@@ -1,5 +1,7 @@
 
 *.pyc
 __pycache__
+.venv/
+src/people/*.npy
 
 Facial-Recognition-Door-Lock.html
