@@ -134,6 +134,14 @@
 			background: var(--denied);
 		}
 
+		.door-status.is-locked .status-dot {
+			background: var(--accent);
+		}
+
+		.door-status.is-unlocked .status-dot {
+			background: var(--allowed);
+		}
+
 		.btn {
 			display: inline-flex;
 			align-items: center;
@@ -164,6 +172,17 @@
 			background: var(--accent-strong);
 		}
 
+		.btn-success {
+			border-color: var(--allowed);
+			background: var(--allowed);
+			color: #ffffff;
+		}
+
+		.btn-success:hover {
+			border-color: #0f5b3f;
+			background: #0f5b3f;
+		}
+
 		.btn-danger {
 			border-color: #e2b7b2;
 			color: var(--denied);
@@ -171,6 +190,16 @@
 
 		.btn-danger:hover {
 			background: var(--denied-bg);
+		}
+
+		.manual-controls {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.door-action {
+			min-width: 112px;
 		}
 
 		.grid {
@@ -435,8 +464,9 @@
 		.person-actions {
 			display: flex;
 			align-items: center;
-			justify-content: space-between;
+			justify-content: flex-start;
 			gap: 12px;
+			flex-wrap: wrap;
 			margin-top: 12px;
 		}
 
@@ -694,6 +724,14 @@
 				justify-content: flex-start;
 			}
 
+			.manual-controls {
+				width: 100%;
+			}
+
+			.manual-controls .btn {
+				flex: 1 1 0;
+			}
+
 			.grid {
 				grid-template-columns: 1fr;
 			}
@@ -768,6 +806,13 @@
 				<div id="serviceStatus" class="status-pill" aria-live="polite">
 					<span class="status-dot"></span>
 					<span id="serviceStatusText">Checking service</span>
+				</div>
+				<div id="doorStatus" class="status-pill door-status" aria-live="polite">
+					<span class="status-dot"></span>
+					<span id="doorStatusText">Lock state unknown</span>
+				</div>
+				<div class="manual-controls" aria-label="Manual door controls">
+					<button id="doorActionButton" class="btn btn-success door-action" type="button">Unlock</button>
 				</div>
 				<button id="refreshButton" class="btn btn-primary" type="button">Refresh</button>
 			</div>
@@ -847,6 +892,7 @@
 							<span class="switch-track"></span>
 						</span>
 					</label>
+					<button class="btn sample-button" type="button">Add sample</button>
 					<button class="btn btn-danger delete-button" type="button">Delete</button>
 				</div>
 			</div>
@@ -904,6 +950,8 @@
 			loading: false,
 			merging: false,
 			deleting: false,
+			doorBusy: false,
+			doorState: null,
 			mockMode: false,
 			feedAvailable: true,
 			selected: new Set(),
@@ -918,7 +966,10 @@
 			mockNotice: document.getElementById('mockNotice'),
 			status: document.getElementById('serviceStatus'),
 			statusText: document.getElementById('serviceStatusText'),
+			doorStatus: document.getElementById('doorStatus'),
+			doorStatusText: document.getElementById('doorStatusText'),
 			refreshButton: document.getElementById('refreshButton'),
+			doorActionButton: document.getElementById('doorActionButton'),
 			searchInput: document.getElementById('searchInput'),
 			clearSearchButton: document.getElementById('clearSearchButton'),
 			mergeBar: document.getElementById('mergeBar'),
@@ -958,6 +1009,45 @@
 			elements.status.classList.toggle('is-online', kind === 'online');
 			elements.status.classList.toggle('is-error', kind === 'error');
 			elements.statusText.textContent = text;
+		}
+
+		function updateDoorControls() {
+			const door = state.doorState || {};
+			const action = door.state === 'unlocked' ? 'lock' : 'unlock';
+			elements.doorActionButton.dataset.action = action;
+			elements.doorActionButton.textContent = state.doorBusy
+				? (action === 'unlock' ? 'Unlocking...' : 'Locking...')
+				: (action === 'unlock' ? 'Unlock' : 'Lock now');
+			elements.doorActionButton.disabled = state.doorBusy || door.state === 'error';
+			elements.doorActionButton.classList.toggle('btn-success', action === 'unlock');
+			elements.doorActionButton.classList.toggle('btn-danger', action === 'lock');
+		}
+
+		function setDoorControlsBusy(busy) {
+			state.doorBusy = busy;
+			updateDoorControls();
+		}
+
+		function setDoorState(door) {
+			state.doorState = door || null;
+			elements.doorStatus.classList.toggle('is-locked', Boolean(door && door.state === 'locked'));
+			elements.doorStatus.classList.toggle('is-unlocked', Boolean(door && door.state === 'unlocked'));
+			elements.doorStatus.classList.toggle('is-error', Boolean(door && door.state === 'error'));
+
+			if (!door) {
+				elements.doorStatusText.textContent = 'Lock state unknown';
+			} else if (door.state === 'unlocked') {
+				const remaining = Math.ceil(Number(door.remainingSeconds || 0));
+				elements.doorStatusText.textContent = remaining > 0 ? `Unlocked (${remaining}s)` : 'Unlocked';
+			} else if (door.state === 'locked') {
+				elements.doorStatusText.textContent = 'Locked';
+			} else if (door.state === 'error') {
+				elements.doorStatusText.textContent = 'Lock state error';
+			} else {
+				elements.doorStatusText.textContent = 'Lock state unknown';
+			}
+
+			updateDoorControls();
 		}
 
 		function setFeedAvailable(available, text) {
@@ -1168,6 +1258,7 @@
 				const access = fragment.querySelector('.access');
 				const accessLabel = fragment.querySelector('.access-label');
 				const accessInput = fragment.querySelector('.access-input');
+				const sampleButton = fragment.querySelector('.sample-button');
 				const deleteButton = fragment.querySelector('.delete-button');
 
 				row.dataset.uid = person.uid;
@@ -1176,7 +1267,8 @@
 				image.alt = displayName(person);
 				input.value = displayName(person);
 				input.dataset.originalValue = input.value;
-				id.textContent = person.uid;
+				const sampleCount = person.samples || 1;
+				id.textContent = `${person.uid} · ${sampleCount} ${sampleCount === 1 ? 'sample' : 'samples'}`;
 				selectInput.checked = state.selected.has(person.uid);
 				access.classList.toggle('is-allowed', Boolean(person.allowed));
 				accessLabel.textContent = person.allowed ? 'Allowed' : 'Denied';
@@ -1213,6 +1305,10 @@
 
 				accessInput.addEventListener('change', () => {
 					toggleAccess(person.uid, accessInput);
+				});
+
+				sampleButton.addEventListener('click', () => {
+					captureSample(person.uid, displayName(person), sampleButton);
 				});
 
 				deleteButton.addEventListener('click', () => {
@@ -1279,8 +1375,58 @@
 			try {
 				const status = await requestJson('/status');
 				setMockMode(Boolean(status.mockMode));
+				setDoorState(status.door);
 			} catch (error) {
 				setMockMode(false);
+				setDoorState(null);
+			}
+		}
+
+		async function manualDoorAction(action) {
+			if (state.doorBusy) {
+				return;
+			}
+
+			setDoorControlsBusy(true);
+			try {
+				const result = await requestJson('/door', {
+					method: 'POST',
+					body: JSON.stringify({ action }),
+				});
+				if (!result.ok) {
+					throw new Error(result.error || 'door control failed');
+				}
+				setDoorState(result.door);
+				setNotice('');
+				setServiceStatus('online', action === 'unlock' ? 'Unlock triggered' : 'Lock triggered');
+			} catch (error) {
+				setNotice(`Could not ${action} door: ${error.message}`);
+				setServiceStatus('error', 'Door control error');
+			} finally {
+				setDoorControlsBusy(false);
+			}
+		}
+
+		async function captureSample(uid, name, button) {
+			button.disabled = true;
+			button.textContent = 'Capturing...';
+
+			try {
+				const result = await requestJson('/sample', {
+					method: 'POST',
+					body: JSON.stringify({ uid }),
+				});
+				if (!result.ok) {
+					throw new Error(result.error || 'sample capture failed');
+				}
+				setNotice('');
+				setServiceStatus('online', `Sample added for ${name}`);
+				await loadPeople();
+			} catch (error) {
+				setNotice(`Could not add sample for ${name}: ${error.message}`);
+			} finally {
+				button.disabled = false;
+				button.textContent = 'Add sample';
 			}
 		}
 
@@ -1384,6 +1530,9 @@
 		}
 
 		elements.refreshButton.addEventListener('click', loadPeople);
+		elements.doorActionButton.addEventListener('click', () => {
+			manualDoorAction(elements.doorActionButton.dataset.action || 'unlock');
+		});
 		elements.searchInput.addEventListener('input', (event) => {
 			state.filter = event.target.value;
 			renderPeople();
@@ -1433,10 +1582,8 @@
 
 		loadStatus();
 		loadPeople();
-		window.setInterval(() => {
-			loadStatus();
-			loadPeople();
-		}, 15000);
+		window.setInterval(loadStatus, 2000);
+		window.setInterval(loadPeople, 15000);
 	</script>
 </body>
 </html>

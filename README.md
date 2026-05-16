@@ -107,6 +107,25 @@ The file should be about 5.2 MB. Keep it named `face_embedder.tflite`, or set
 Do not use the `face_detection_*.tflite` files here; MediaPipe already handles
 face detection, and this project needs an embedding model for identity matching.
 
+### Identity Samples
+
+Each person can store multiple face embeddings. Existing `src/people/<uid>.npy`
+files are still supported, and the app will create
+`src/people/<uid>.embeddings.npy` when identities are loaded or updated.
+
+Use the web UI `Add sample` button while the person is visible to capture another
+embedding for that identity. Merging people keeps samples from the merged
+identities instead of collapsing everything into one vector.
+
+Useful tuning values in `/etc/default/doorlock`:
+
+```bash
+DOORLOCK_MAX_EMBEDDINGS_PER_PERSON="20"
+DOORLOCK_SAMPLE_THRESHOLD="0.60"
+DOORLOCK_AUTO_LEARN="1"
+DOORLOCK_AUTO_LEARN_INTERVAL_SECONDS="20"
+```
+
 ### Camera Backend
 
 Choose one camera backend before starting the service. The default is the

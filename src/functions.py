@@ -2,6 +2,8 @@ import asyncio
 import os
 import shutil
 import subprocess
+import threading
+import time
 
 import cv2
 import gpiozero
@@ -10,6 +12,17 @@ import numpy as np
 
 relay = None
 relay_error_reported = False
+unlock_timer = None
+door_state_lock = threading.RLock()
+door_state = {
+	'state': 'locked',
+	'relayActive': False,
+	'lastAction': 'startup',
+	'lastChanged': None,
+	'unlockUntil': None,
+	'unlockSeconds': None,
+	'error': None,
+}
 
 
 def truthy(value):
@@ -35,6 +48,9 @@ def scaled_frame(frame, scale):
 
 
 class NullRelay:
+	def on(self):
+		return None
+
 	def blink(self, *args, **kwargs):
 		return None
 
@@ -67,9 +83,14 @@ def get_relay():
 def close_relay():
 	global relay
 
+	with door_state_lock:
+		_cancel_unlock_timer_unlocked()
+
 	if relay is not None and hasattr(relay, 'close'):
 		relay.close()
 	relay = None
+	with door_state_lock:
+		_set_door_state_unlocked('locked', False, 'shutdown')
 
 
 def report_relay_error(error):
@@ -80,12 +101,105 @@ def report_relay_error(error):
 		relay_error_reported = True
 
 
+def _snapshot_door_state_unlocked():
+	state = dict(door_state)
+	if state['unlockUntil'] is not None:
+		state['remainingSeconds'] = max(0, round(state['unlockUntil'] - time.time(), 1))
+	else:
+		state['remainingSeconds'] = 0
+	return state
+
+
+def doorState():
+	with door_state_lock:
+		return _snapshot_door_state_unlocked()
+
+
+def _set_door_state_unlocked(state, relay_active, action, unlock_until=None, unlock_seconds=None, error=None):
+	door_state.update({
+		'state': state,
+		'relayActive': relay_active,
+		'lastAction': action,
+		'lastChanged': time.time(),
+		'unlockUntil': unlock_until,
+		'unlockSeconds': unlock_seconds,
+		'error': error,
+	})
+	return _snapshot_door_state_unlocked()
+
+
+def _cancel_unlock_timer_unlocked():
+	global unlock_timer
+
+	if unlock_timer is not None:
+		unlock_timer.cancel()
+		unlock_timer = None
+
+
+def _auto_lock():
+	global unlock_timer
+
+	try:
+		get_relay().off()
+		with door_state_lock:
+			unlock_timer = None
+			_set_door_state_unlocked('locked', False, 'auto-lock')
+	except Exception as e:
+		with door_state_lock:
+			unlock_timer = None
+			_set_door_state_unlocked('error', False, 'auto-lock', error=str(e))
+		print(e)
+
+
+def unlockDoor(seconds=None):
+	global unlock_timer
+
+	if seconds is None:
+		seconds = env_float('DOORLOCK_UNLOCK_SECONDS', 5.0)
+
+	try:
+		get_relay().on()
+	except Exception as e:
+		with door_state_lock:
+			_set_door_state_unlocked('error', False, 'unlock', error=str(e))
+		raise
+
+	timer = threading.Timer(seconds, _auto_lock)
+	timer.daemon = True
+
+	with door_state_lock:
+		_cancel_unlock_timer_unlocked()
+		unlock_timer = timer
+		state = _set_door_state_unlocked(
+			'unlocked',
+			True,
+			'unlock',
+			unlock_until=time.time() + seconds,
+			unlock_seconds=seconds,
+		)
+	timer.start()
+	return state
+
+
+def lockDoor():
+	try:
+		get_relay().off()
+	except Exception as e:
+		with door_state_lock:
+			_set_door_state_unlocked('error', False, 'lock', error=str(e))
+		raise
+
+	with door_state_lock:
+		_cancel_unlock_timer_unlocked()
+		return _set_door_state_unlocked('locked', False, 'lock')
+
+
 def accessGranted(name=None):
 	print('Access Granted')
 	if name:
 		print('Hello', name)
 	try:
-		get_relay().blink(5, 1, 1)
+		unlockDoor()
 	except Exception as e:
 		report_relay_error(e)
 
@@ -93,7 +207,7 @@ def accessGranted(name=None):
 def accessDenied(name=None):
 	print('Access Denied')
 	try:
-		get_relay().off()
+		lockDoor()
 	except Exception as e:
 		report_relay_error(e)
 
@@ -322,6 +436,7 @@ async def videoProcessing(identifier, imshow=False):
 					print(e)
 					last_camera_error = error
 				identifier.setNoFeed('No camera feed')
+				identifier.setCurrentFaces([])
 				continue
 			last_camera_error = None
 
@@ -335,7 +450,9 @@ async def videoProcessing(identifier, imshow=False):
 			except Exception as e:
 				print('face recognition failed')
 				print(e)
+				identifier.setCurrentFaces([])
 				continue
+			identifier.setCurrentFaces(faces)
 
 			for face in faces:
 				left, top, right, bottom = face['box']
