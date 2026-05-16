@@ -525,6 +525,131 @@
 			display: block;
 		}
 
+		body.is-modal-open {
+			overflow: hidden;
+		}
+
+		.modal-backdrop {
+			position: fixed;
+			inset: 0;
+			z-index: 20;
+			display: grid;
+			place-items: center;
+			padding: 20px;
+			background: rgba(18, 24, 32, 0.56);
+		}
+
+		.modal-backdrop[hidden] {
+			display: none;
+		}
+
+		.modal {
+			width: min(480px, 100%);
+			overflow: hidden;
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			background: var(--panel);
+			box-shadow: 0 28px 80px rgba(18, 24, 32, 0.28);
+		}
+
+		.modal-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 16px 18px;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.modal-title {
+			margin: 0;
+			font-size: 18px;
+			font-weight: 800;
+			letter-spacing: 0;
+		}
+
+		.modal-close {
+			display: inline-grid;
+			width: 34px;
+			height: 34px;
+			place-items: center;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: #ffffff;
+			color: var(--muted);
+			font-weight: 800;
+		}
+
+		.modal-close:hover {
+			border-color: #b6c2d2;
+			color: var(--text);
+		}
+
+		.modal-body {
+			display: grid;
+			gap: 14px;
+			padding: 18px;
+		}
+
+		.modal-copy {
+			margin: 0;
+			color: var(--muted);
+		}
+
+		.merge-summary {
+			display: grid;
+			gap: 8px;
+		}
+
+		.summary-label {
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 800;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
+		}
+
+		.summary-person,
+		.summary-list li {
+			padding: 9px 10px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: #fbfcfe;
+			font-weight: 700;
+			overflow-wrap: anywhere;
+		}
+
+		.summary-list {
+			display: grid;
+			gap: 6px;
+			max-height: 160px;
+			margin: 0;
+			padding: 0;
+			overflow: auto;
+			list-style: none;
+		}
+
+		.modal-error {
+			padding: 10px 11px;
+			border: 1px solid #e2b7b2;
+			border-radius: 7px;
+			background: var(--denied-bg);
+			color: var(--denied);
+		}
+
+		.modal-error[hidden] {
+			display: none;
+		}
+
+		.modal-actions {
+			display: flex;
+			justify-content: flex-end;
+			gap: 10px;
+			padding: 14px 18px 18px;
+			border-top: 1px solid var(--line);
+			background: #fbfcfe;
+		}
+
 		.mode-notice {
 			display: flex;
 			align-items: center;
@@ -617,6 +742,10 @@
 			.access {
 				width: 100%;
 				justify-content: space-between;
+			}
+
+			.modal-actions {
+				flex-direction: column-reverse;
 			}
 
 			.btn {
@@ -724,16 +853,64 @@
 		</article>
 	</template>
 
+	<div id="mergeModal" class="modal-backdrop" hidden>
+		<section class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeModalTitle" aria-describedby="mergeModalCopy">
+			<div class="modal-header">
+				<h2 id="mergeModalTitle" class="modal-title">Merge people</h2>
+				<button id="mergeModalClose" class="modal-close" type="button" aria-label="Close merge confirmation">X</button>
+			</div>
+			<div class="modal-body">
+				<p id="mergeModalCopy" class="modal-copy"></p>
+				<div class="merge-summary">
+					<div class="summary-label">Keep</div>
+					<div id="mergeModalTarget" class="summary-person"></div>
+					<div class="summary-label">Merge in</div>
+					<ul id="mergeModalSources" class="summary-list"></ul>
+				</div>
+				<div id="mergeModalError" class="modal-error" role="alert" hidden></div>
+			</div>
+			<div class="modal-actions">
+				<button id="cancelMergeButton" class="btn" type="button">Cancel</button>
+				<button id="confirmMergeButton" class="btn btn-primary" type="button">Merge people</button>
+			</div>
+		</section>
+	</div>
+
+	<div id="deleteModal" class="modal-backdrop" hidden>
+		<section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-describedby="deleteModalCopy">
+			<div class="modal-header">
+				<h2 id="deleteModalTitle" class="modal-title">Delete person</h2>
+				<button id="deleteModalClose" class="modal-close" type="button" aria-label="Close delete confirmation">X</button>
+			</div>
+			<div class="modal-body">
+				<p id="deleteModalCopy" class="modal-copy">This removes the saved face image, embedding, access setting, and display name for this person.</p>
+				<div class="merge-summary">
+					<div class="summary-label">Delete</div>
+					<div id="deleteModalPerson" class="summary-person"></div>
+				</div>
+				<div id="deleteModalError" class="modal-error" role="alert" hidden></div>
+			</div>
+			<div class="modal-actions">
+				<button id="cancelDeleteButton" class="btn" type="button">Cancel</button>
+				<button id="confirmDeleteButton" class="btn btn-danger" type="button">Delete person</button>
+			</div>
+		</section>
+	</div>
+
 	<script>
 		const state = {
 			people: [],
 			filter: '',
 			loading: false,
 			merging: false,
+			deleting: false,
 			mockMode: false,
 			feedAvailable: true,
 			selected: new Set(),
 			mergeTarget: '',
+			pendingMerge: null,
+			pendingDelete: null,
+			lastFocusedElement: null,
 		};
 
 		const elements = {
@@ -749,6 +926,20 @@
 			mergeTarget: document.getElementById('mergeTarget'),
 			mergeButton: document.getElementById('mergeButton'),
 			clearSelectionButton: document.getElementById('clearSelectionButton'),
+			mergeModal: document.getElementById('mergeModal'),
+			mergeModalClose: document.getElementById('mergeModalClose'),
+			mergeModalCopy: document.getElementById('mergeModalCopy'),
+			mergeModalTarget: document.getElementById('mergeModalTarget'),
+			mergeModalSources: document.getElementById('mergeModalSources'),
+			mergeModalError: document.getElementById('mergeModalError'),
+			cancelMergeButton: document.getElementById('cancelMergeButton'),
+			confirmMergeButton: document.getElementById('confirmMergeButton'),
+			deleteModal: document.getElementById('deleteModal'),
+			deleteModalClose: document.getElementById('deleteModalClose'),
+			deleteModalPerson: document.getElementById('deleteModalPerson'),
+			deleteModalError: document.getElementById('deleteModalError'),
+			cancelDeleteButton: document.getElementById('cancelDeleteButton'),
+			confirmDeleteButton: document.getElementById('confirmDeleteButton'),
 			peopleList: document.getElementById('peopleList'),
 			peopleCount: document.getElementById('peopleCount'),
 			template: document.getElementById('personTemplate'),
@@ -852,6 +1043,107 @@
 			renderPeople();
 		}
 
+		function setMergeModalError(message) {
+			elements.mergeModalError.textContent = message || '';
+			elements.mergeModalError.hidden = !message;
+		}
+
+		function setMergeModalBusy(busy) {
+			elements.confirmMergeButton.disabled = busy;
+			elements.cancelMergeButton.disabled = busy;
+			elements.mergeModalClose.disabled = busy;
+			elements.confirmMergeButton.textContent = busy ? 'Merging...' : 'Merge people';
+		}
+
+		function closeMergeModal() {
+			if (state.merging) {
+				return;
+			}
+
+			elements.mergeModal.hidden = true;
+			document.body.classList.remove('is-modal-open');
+			setMergeModalError('');
+			state.pendingMerge = null;
+
+			if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
+				state.lastFocusedElement.focus();
+			}
+			state.lastFocusedElement = null;
+		}
+
+		function openMergeModal() {
+			const selected = selectedPeople();
+			if (selected.length < 2) {
+				return;
+			}
+
+			let target = state.mergeTarget || selected[0].uid;
+			if (!selected.some((person) => person.uid === target)) {
+				target = selected[0].uid;
+				state.mergeTarget = target;
+			}
+			const targetPerson = selected.find((person) => person.uid === target);
+			const sources = selected.map((person) => person.uid).filter((uid) => uid !== target);
+			const sourcePeople = selected.filter((person) => person.uid !== target);
+			const label = sources.length === 1 ? 'person' : 'people';
+
+			state.pendingMerge = { target, sources };
+			state.lastFocusedElement = document.activeElement;
+			elements.mergeModalCopy.textContent = `Merge ${sources.length} selected ${label} into ${displayName(targetPerson)}. The selected target identity will be kept.`;
+			elements.mergeModalTarget.textContent = displayName(targetPerson);
+			elements.mergeModalSources.replaceChildren();
+			for (const person of sourcePeople) {
+				const item = document.createElement('li');
+				item.textContent = displayName(person);
+				elements.mergeModalSources.append(item);
+			}
+
+			setMergeModalError('');
+			setMergeModalBusy(false);
+			elements.mergeModal.hidden = false;
+			document.body.classList.add('is-modal-open');
+			elements.confirmMergeButton.focus();
+		}
+
+		function setDeleteModalError(message) {
+			elements.deleteModalError.textContent = message || '';
+			elements.deleteModalError.hidden = !message;
+		}
+
+		function setDeleteModalBusy(busy) {
+			elements.confirmDeleteButton.disabled = busy;
+			elements.cancelDeleteButton.disabled = busy;
+			elements.deleteModalClose.disabled = busy;
+			elements.confirmDeleteButton.textContent = busy ? 'Deleting...' : 'Delete person';
+		}
+
+		function closeDeleteModal() {
+			if (state.deleting) {
+				return;
+			}
+
+			elements.deleteModal.hidden = true;
+			document.body.classList.remove('is-modal-open');
+			setDeleteModalError('');
+			state.pendingDelete = null;
+
+			if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
+				state.lastFocusedElement.focus();
+			}
+			state.lastFocusedElement = null;
+		}
+
+		function openDeleteModal(uid, name) {
+			state.pendingDelete = { uid, name };
+			state.lastFocusedElement = document.activeElement;
+			elements.deleteModalPerson.textContent = name;
+			setDeleteModalError('');
+			setDeleteModalBusy(false);
+			elements.deleteModal.hidden = false;
+			document.body.classList.add('is-modal-open');
+			elements.confirmDeleteButton.focus();
+		}
+
 		function renderPeople() {
 			const people = filteredPeople();
 			elements.peopleList.replaceChildren();
@@ -924,7 +1216,7 @@
 				});
 
 				deleteButton.addEventListener('click', () => {
-					deletePerson(person.uid, displayName(person));
+					openDeleteModal(person.uid, displayName(person));
 				});
 
 				elements.peopleList.append(fragment);
@@ -1020,10 +1312,15 @@
 			}
 		}
 
-		async function deletePerson(uid, name) {
-			if (!window.confirm(`Delete ${name}?`)) {
+		async function deletePerson() {
+			if (!state.pendingDelete) {
 				return;
 			}
+
+			const { uid } = state.pendingDelete;
+			state.deleting = true;
+			setDeleteModalBusy(true);
+			setDeleteModalError('');
 
 			try {
 				await requestJson('/delete', {
@@ -1035,28 +1332,30 @@
 					state.mergeTarget = '';
 				}
 				await loadPeople();
+				state.pendingDelete = null;
+				elements.deleteModal.hidden = true;
+				document.body.classList.remove('is-modal-open');
+				setDeleteModalError('');
+				state.lastFocusedElement = null;
 			} catch (error) {
-				setNotice(`Could not delete person: ${error.message}`);
+				setDeleteModalError(`Could not delete person: ${error.message}`);
+			} finally {
+				state.deleting = false;
+				setDeleteModalBusy(false);
 			}
 		}
 
 		async function mergeSelectedPeople() {
-			const selected = selectedPeople();
-			if (selected.length < 2) {
+			if (!state.pendingMerge) {
 				return;
 			}
 
-			const target = state.mergeTarget || selected[0].uid;
-			const sources = selected.map((person) => person.uid).filter((uid) => uid !== target);
-			const targetName = displayName(selected.find((person) => person.uid === target));
-			const label = sources.length === 1 ? 'person' : 'people';
-
-			if (!window.confirm(`Merge ${sources.length} selected ${label} into ${targetName}?`)) {
-				return;
-			}
+			const { target, sources } = state.pendingMerge;
 
 			state.merging = true;
 			renderMergeBar();
+			setMergeModalBusy(true);
+			setMergeModalError('');
 
 			try {
 				const result = await requestJson('/merge', {
@@ -1070,10 +1369,16 @@
 				state.mergeTarget = '';
 				setNotice('');
 				await loadPeople();
+				state.pendingMerge = null;
+				elements.mergeModal.hidden = true;
+				document.body.classList.remove('is-modal-open');
+				setMergeModalError('');
+				state.lastFocusedElement = null;
 			} catch (error) {
-				setNotice(`Could not merge people: ${error.message}`);
+				setMergeModalError(`Could not merge people: ${error.message}`);
 			} finally {
 				state.merging = false;
+				setMergeModalBusy(false);
 				renderMergeBar();
 			}
 		}
@@ -1092,8 +1397,32 @@
 			state.mergeTarget = event.target.value;
 			renderMergeBar();
 		});
-		elements.mergeButton.addEventListener('click', mergeSelectedPeople);
+		elements.mergeButton.addEventListener('click', openMergeModal);
 		elements.clearSelectionButton.addEventListener('click', clearSelection);
+		elements.confirmMergeButton.addEventListener('click', mergeSelectedPeople);
+		elements.cancelMergeButton.addEventListener('click', closeMergeModal);
+		elements.mergeModalClose.addEventListener('click', closeMergeModal);
+		elements.confirmDeleteButton.addEventListener('click', deletePerson);
+		elements.cancelDeleteButton.addEventListener('click', closeDeleteModal);
+		elements.deleteModalClose.addEventListener('click', closeDeleteModal);
+		elements.mergeModal.addEventListener('click', (event) => {
+			if (event.target === elements.mergeModal) {
+				closeMergeModal();
+			}
+		});
+		elements.deleteModal.addEventListener('click', (event) => {
+			if (event.target === elements.deleteModal) {
+				closeDeleteModal();
+			}
+		});
+		document.addEventListener('keydown', (event) => {
+			if (event.key === 'Escape' && !elements.mergeModal.hidden) {
+				closeMergeModal();
+			}
+			if (event.key === 'Escape' && !elements.deleteModal.hidden) {
+				closeDeleteModal();
+			}
+		});
 
 		elements.mainView.addEventListener('load', () => {
 			setFeedAvailable(true, state.mockMode ? 'Mock stream active' : 'Stream connected');
