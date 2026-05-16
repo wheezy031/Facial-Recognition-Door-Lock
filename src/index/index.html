@@ -1,114 +1,901 @@
+<!doctype html>
+<html lang="en">
 <head>
-	<link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap/dist/css/bootstrap.css" />
-	<link
-										type="text/css"
-		  rel="stylesheet"
-	href="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.css"
- />
-	<script src="https://unpkg.com/@babel/polyfill@latest/dist/polyfill.js"></script>
-	<script src="https://unpkg.com/vue@latest/dist/vue.js"></script>
-	<script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.js"></script>
-	<script src="https://unpkg.com/axios/dist/axios.js"></script>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Door Lock</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--bg: #f5f7fa;
+			--panel: #ffffff;
+			--panel-subtle: #eef2f7;
+			--text: #18212f;
+			--muted: #657287;
+			--line: #d8dee8;
+			--accent: #225a9f;
+			--accent-strong: #173f72;
+			--allowed: #167251;
+			--allowed-bg: #e5f5ee;
+			--denied: #a83a32;
+			--denied-bg: #fae9e7;
+			--warning: #90640f;
+			--shadow: 0 18px 50px rgba(24, 33, 47, 0.08);
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			min-width: 320px;
+			background: var(--bg);
+			color: var(--text);
+			font: 15px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		}
+
+		button,
+		input {
+			font: inherit;
+		}
+
+		button {
+			cursor: pointer;
+		}
+
+		button:disabled,
+		input:disabled {
+			cursor: not-allowed;
+			opacity: 0.62;
+		}
+
+		.shell {
+			width: min(1440px, 100%);
+			margin: 0 auto;
+			padding: 24px;
+		}
+
+		.topbar {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 18px;
+			margin-bottom: 22px;
+		}
+
+		.brand {
+			display: flex;
+			align-items: center;
+			gap: 14px;
+			min-width: 0;
+		}
+
+		.brand-mark {
+			display: grid;
+			width: 42px;
+			height: 42px;
+			place-items: center;
+			border-radius: 8px;
+			background: var(--text);
+			color: #ffffff;
+			font-weight: 800;
+			letter-spacing: 0;
+		}
+
+		h1 {
+			margin: 0;
+			font-size: clamp(24px, 3vw, 34px);
+			line-height: 1.05;
+			letter-spacing: 0;
+		}
+
+		.subhead {
+			margin: 4px 0 0;
+			color: var(--muted);
+			font-size: 14px;
+		}
+
+		.toolbar {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+		}
+
+		.status-pill {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			min-height: 36px;
+			padding: 7px 11px;
+			border: 1px solid var(--line);
+			border-radius: 999px;
+			background: var(--panel);
+			color: var(--muted);
+			white-space: nowrap;
+		}
+
+		.status-dot {
+			width: 9px;
+			height: 9px;
+			border-radius: 50%;
+			background: var(--warning);
+		}
+
+		.status-pill.is-online .status-dot {
+			background: var(--allowed);
+		}
+
+		.status-pill.is-error .status-dot {
+			background: var(--denied);
+		}
+
+		.btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			min-height: 38px;
+			padding: 8px 13px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: var(--panel);
+			color: var(--text);
+			font-weight: 650;
+			text-decoration: none;
+		}
+
+		.btn:hover {
+			border-color: #b6c2d2;
+			background: #f9fbfd;
+		}
+
+		.btn-primary {
+			border-color: var(--accent);
+			background: var(--accent);
+			color: #ffffff;
+		}
+
+		.btn-primary:hover {
+			border-color: var(--accent-strong);
+			background: var(--accent-strong);
+		}
+
+		.btn-danger {
+			border-color: #e2b7b2;
+			color: var(--denied);
+		}
+
+		.btn-danger:hover {
+			background: var(--denied-bg);
+		}
+
+		.grid {
+			display: grid;
+			grid-template-columns: minmax(0, 1.45fr) minmax(380px, 0.8fr);
+			gap: 22px;
+			align-items: start;
+		}
+
+		.panel {
+			background: var(--panel);
+			border: 1px solid var(--line);
+			border-radius: 8px;
+			box-shadow: var(--shadow);
+			overflow: hidden;
+		}
+
+		.panel-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 14px;
+			min-height: 62px;
+			padding: 16px 18px;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.panel-title {
+			margin: 0;
+			font-size: 16px;
+			font-weight: 800;
+			letter-spacing: 0;
+		}
+
+		.panel-meta {
+			color: var(--muted);
+			font-size: 13px;
+			white-space: nowrap;
+		}
+
+		.video-wrap {
+			position: relative;
+			background: #121820;
+			aspect-ratio: 16 / 9;
+			min-height: 260px;
+		}
+
+		.video-stream {
+			display: block;
+			width: 100%;
+			height: 100%;
+			object-fit: contain;
+			background: #121820;
+		}
+
+		.video-wrap.is-unavailable .video-stream {
+			opacity: 0;
+		}
+
+		.video-fallback {
+			position: absolute;
+			inset: 0;
+			display: grid;
+			place-items: center;
+			padding: 28px;
+			background: #121820;
+			color: #e7ecf3;
+			text-align: center;
+		}
+
+		.video-fallback[hidden] {
+			display: none;
+		}
+
+		.video-fallback-inner {
+			display: grid;
+			justify-items: center;
+			gap: 12px;
+			max-width: 360px;
+		}
+
+		.camera-icon {
+			width: 96px;
+			height: 96px;
+			color: #bfc8d5;
+		}
+
+		.fallback-title {
+			font-size: 18px;
+			font-weight: 800;
+		}
+
+		.fallback-copy {
+			margin: 0;
+			color: #96a2b3;
+			font-size: 14px;
+		}
+
+		.video-status {
+			position: absolute;
+			left: 16px;
+			bottom: 16px;
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 10px;
+			border-radius: 999px;
+			background: rgba(18, 24, 32, 0.78);
+			color: #ffffff;
+			font-size: 13px;
+		}
+
+		.video-wrap.is-unavailable .video-status {
+			display: none;
+		}
+
+		.people-tools {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 10px;
+			padding: 14px 18px;
+			border-bottom: 1px solid var(--line);
+			background: #fbfcfe;
+		}
+
+		.search {
+			width: 100%;
+			min-height: 38px;
+			padding: 8px 11px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: #ffffff;
+			color: var(--text);
+		}
+
+		.search:focus,
+		.name-input:focus {
+			outline: 3px solid rgba(34, 90, 159, 0.14);
+			border-color: var(--accent);
+		}
+
+		.people-list {
+			display: grid;
+			gap: 0;
+		}
+
+		.person {
+			display: grid;
+			grid-template-columns: 78px minmax(0, 1fr);
+			gap: 14px;
+			padding: 16px 18px;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.person:last-child {
+			border-bottom: 0;
+		}
+
+		.person-image {
+			width: 78px;
+			height: 78px;
+			border-radius: 8px;
+			object-fit: cover;
+			border: 1px solid var(--line);
+			background: var(--panel-subtle);
+		}
+
+		.person-main {
+			min-width: 0;
+		}
+
+		.person-topline {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 10px;
+			margin-bottom: 8px;
+		}
+
+		.person-name {
+			min-width: 0;
+		}
+
+		.name-input {
+			width: 100%;
+			min-height: 38px;
+			padding: 7px 10px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: #ffffff;
+			color: var(--text);
+			font-weight: 650;
+		}
+
+		.person-id {
+			margin-top: 5px;
+			color: var(--muted);
+			font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+			font-size: 12px;
+			overflow-wrap: anywhere;
+		}
+
+		.person-actions {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			margin-top: 12px;
+		}
+
+		.access {
+			display: inline-flex;
+			align-items: center;
+			gap: 9px;
+			min-width: 144px;
+			padding: 8px 10px;
+			border-radius: 999px;
+			background: var(--denied-bg);
+			color: var(--denied);
+			font-weight: 750;
+		}
+
+		.access.is-allowed {
+			background: var(--allowed-bg);
+			color: var(--allowed);
+		}
+
+		.switch {
+			position: relative;
+			display: inline-flex;
+			width: 42px;
+			height: 24px;
+			flex: 0 0 auto;
+		}
+
+		.switch input {
+			position: absolute;
+			opacity: 0;
+			width: 1px;
+			height: 1px;
+		}
+
+		.switch-track {
+			position: absolute;
+			inset: 0;
+			border-radius: 999px;
+			background: #bdc6d4;
+			transition: background 160ms ease;
+		}
+
+		.switch-track::after {
+			content: "";
+			position: absolute;
+			top: 3px;
+			left: 3px;
+			width: 18px;
+			height: 18px;
+			border-radius: 50%;
+			background: #ffffff;
+			box-shadow: 0 1px 4px rgba(24, 33, 47, 0.25);
+			transition: transform 160ms ease;
+		}
+
+		.switch input:checked + .switch-track {
+			background: var(--allowed);
+		}
+
+		.switch input:checked + .switch-track::after {
+			transform: translateX(18px);
+		}
+
+		.switch input:focus + .switch-track {
+			outline: 3px solid rgba(34, 90, 159, 0.18);
+		}
+
+		.empty {
+			padding: 34px 18px;
+			color: var(--muted);
+			text-align: center;
+		}
+
+		.notice {
+			display: none;
+			margin-bottom: 16px;
+			padding: 12px 14px;
+			border: 1px solid #e2b7b2;
+			border-radius: 8px;
+			background: var(--denied-bg);
+			color: var(--denied);
+		}
+
+		.notice.is-visible {
+			display: block;
+		}
+
+		.mode-notice {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			margin-bottom: 16px;
+			padding: 12px 14px;
+			border: 1px solid #d7c184;
+			border-radius: 8px;
+			background: #fff8e1;
+			color: #6f5513;
+		}
+
+		.mode-notice[hidden] {
+			display: none;
+		}
+
+		.mode-dot {
+			width: 10px;
+			height: 10px;
+			border-radius: 50%;
+			background: #b8870b;
+			flex: 0 0 auto;
+		}
+
+		.mode-text {
+			min-width: 0;
+			font-weight: 650;
+		}
+
+		@media (max-width: 960px) {
+			.shell {
+				padding: 16px;
+			}
+
+			.topbar {
+				align-items: flex-start;
+				flex-direction: column;
+			}
+
+			.toolbar {
+				width: 100%;
+				justify-content: flex-start;
+			}
+
+			.grid {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		@media (max-width: 560px) {
+			.shell {
+				padding: 12px;
+			}
+
+			.brand-mark {
+				width: 38px;
+				height: 38px;
+			}
+
+			.people-tools {
+				grid-template-columns: 1fr;
+			}
+
+			.person {
+				grid-template-columns: 64px minmax(0, 1fr);
+				padding: 14px;
+			}
+
+			.person-image {
+				width: 64px;
+				height: 64px;
+			}
+
+			.person-topline,
+			.person-actions {
+				align-items: flex-start;
+				flex-direction: column;
+			}
+
+			.access {
+				width: 100%;
+				justify-content: space-between;
+			}
+
+			.btn {
+				width: 100%;
+			}
+		}
+	</style>
 </head>
-<style>
-.main{
-	border: 1px solid red;
-	border-radius: 3px;
-}
-.side{
-	border: 1px solid blue;
-	border-radius: 3px;
-}
-.personcard{
-	border: 1px solid black;
-	border-radius: 3px;
-	padding: 10px;
-	margin: 3px;
-}
-.personimage{
-	width: 150px;
-	height: 150px;
-}
-</style>
 <body>
-	<!-- Our application root element -->
-	<div id="app">
-		<b-container class="">
-			<b-row>
-				<b-col cols="7" class='main'>
-					<b-img src='/mainview'></b-img>
-				</b-col>
-				<b-col cols="5" class='side'>
-					<b-row align-h='center'>
-						<b-button align-h='center' @click='merge()'>
-							Merge all common names
-						</b-button>
-					</b-row>
-					<b-row align-h='center' v-for='person in people' :key='person.uid'>
-						<b-container class='personcard'>
-							<b-row>
-								<b-col>
-									<b-img thumbnail :src="`${'/image/' + person.uid}`" class='personimage'> </b-img>
-								</b-col>
-								<b-col>
-									<b-form inline>
-										<b-input v-model='person.name'  placeholder='Set a friendly name here' class='mb-2 mr-sm-2 mb-sm-0'></b-input>
-										<b-button size='sm' @click='send_delete(person.uid)'> Delete </b-button>
-									</b-form>
-									<em> {{ person.uid }} </em>
-									<b-form-checkbox switch v-model='person.allowed' name='checked-allowed' @change='chmod(person)'>
-										Allowed Access
-									</b-form-checkbox>
-								</b-col>
-							</b-row>
-						</b-container>
-					</b-card>
-				</b-row>
-			</b-col>
-		</b-row>
-		</b-container>
+	<div class="shell">
+		<header class="topbar">
+			<div class="brand">
+				<div class="brand-mark">DL</div>
+				<div>
+					<h1>Door Lock</h1>
+					<p class="subhead">Camera access control</p>
+				</div>
+			</div>
+			<div class="toolbar">
+				<div id="serviceStatus" class="status-pill" aria-live="polite">
+					<span class="status-dot"></span>
+					<span id="serviceStatusText">Checking service</span>
+				</div>
+				<button id="refreshButton" class="btn btn-primary" type="button">Refresh</button>
+			</div>
+		</header>
+
+		<div id="notice" class="notice" role="alert"></div>
+		<div id="mockNotice" class="mode-notice" hidden>
+			<span class="mode-dot"></span>
+			<span class="mode-text">Mock camera mode is active. The live view is simulated and access decisions are not using physical camera input.</span>
+		</div>
+
+		<main class="grid">
+			<section class="panel" aria-labelledby="cameraTitle">
+				<div class="panel-header">
+					<h2 id="cameraTitle" class="panel-title">Live Camera</h2>
+					<span class="panel-meta">MJPEG stream</span>
+				</div>
+				<div id="videoWrap" class="video-wrap">
+					<img id="mainView" class="video-stream" src="/mainview" alt="Live camera stream">
+					<div id="videoFallback" class="video-fallback" hidden>
+						<div class="video-fallback-inner">
+							<svg class="camera-icon" viewBox="0 0 96 96" role="img" aria-label="Camera unavailable">
+								<rect x="14" y="28" width="50" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="6"></rect>
+								<path d="M64 40l18-12v40L64 56z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="6"></path>
+								<path d="M18 78L78 18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="6"></path>
+							</svg>
+							<div class="fallback-title">Camera feed unavailable</div>
+							<p class="fallback-copy">The service is running, but the browser is not receiving a video stream.</p>
+						</div>
+					</div>
+					<div id="cameraStatus" class="video-status">Stream loading</div>
+				</div>
+			</section>
+
+			<section class="panel" aria-labelledby="peopleTitle">
+				<div class="panel-header">
+					<h2 id="peopleTitle" class="panel-title">People</h2>
+					<span id="peopleCount" class="panel-meta">0 users</span>
+				</div>
+				<div class="people-tools">
+					<input id="searchInput" class="search" type="search" placeholder="Search people" autocomplete="off">
+					<button id="clearSearchButton" class="btn" type="button">Clear</button>
+				</div>
+				<div id="peopleList" class="people-list" aria-live="polite"></div>
+			</section>
+		</main>
 	</div>
 
-	<!-- Start running your app -->
+	<template id="personTemplate">
+		<article class="person">
+			<img class="person-image" alt="">
+			<div class="person-main">
+				<div class="person-topline">
+					<div class="person-name">
+						<input class="name-input" type="text" autocomplete="off">
+						<div class="person-id"></div>
+					</div>
+				</div>
+				<div class="person-actions">
+					<label class="access">
+						<span class="access-label">Denied</span>
+						<span class="switch">
+							<input class="access-input" type="checkbox">
+							<span class="switch-track"></span>
+						</span>
+					</label>
+					<button class="btn btn-danger delete-button" type="button">Delete</button>
+				</div>
+			</div>
+		</article>
+	</template>
+
 	<script>
-window.app = new Vue({
-	el: '#app',
-	data (){ return {
-		people: [], 
-	}},
+		const state = {
+			people: [],
+			filter: '',
+			loading: false,
+			mockMode: false,
+			feedAvailable: true,
+		};
 
-	methods: {
-		chmod(person){
-			axios.post('/access',{
-				'uid' : person.uid,
-			}).then(response =>{
-				console.log(response);
-				this.populate();
-			}).catch(error=>{
-				console.log(error);
-			});
-		},
+		const elements = {
+			notice: document.getElementById('notice'),
+			mockNotice: document.getElementById('mockNotice'),
+			status: document.getElementById('serviceStatus'),
+			statusText: document.getElementById('serviceStatusText'),
+			refreshButton: document.getElementById('refreshButton'),
+			searchInput: document.getElementById('searchInput'),
+			clearSearchButton: document.getElementById('clearSearchButton'),
+			peopleList: document.getElementById('peopleList'),
+			peopleCount: document.getElementById('peopleCount'),
+			template: document.getElementById('personTemplate'),
+			videoWrap: document.getElementById('videoWrap'),
+			mainView: document.getElementById('mainView'),
+			videoFallback: document.getElementById('videoFallback'),
+			cameraStatus: document.getElementById('cameraStatus'),
+		};
 
-		send_delete(uid){
-			axios.post('/delete',[uid]).then(response =>{
-				console.log(response);
-				this.populate();
-			}).catch(error=>{
-				console.log(error);
-			});
-		},
+		function setNotice(message) {
+			elements.notice.textContent = message || '';
+			elements.notice.classList.toggle('is-visible', Boolean(message));
+		}
 
-		populate(){
-			axios.get('/names').then(response =>{
-				this.people = response.data;
-			}).catch(error =>{
-				console.log(error);
+		function setServiceStatus(kind, text) {
+			elements.status.classList.toggle('is-online', kind === 'online');
+			elements.status.classList.toggle('is-error', kind === 'error');
+			elements.statusText.textContent = text;
+		}
+
+		function setFeedAvailable(available, text) {
+			state.feedAvailable = available;
+			elements.videoWrap.classList.toggle('is-unavailable', !available);
+			elements.videoFallback.hidden = available;
+			elements.cameraStatus.textContent = text;
+		}
+
+		function setMockMode(enabled) {
+			state.mockMode = enabled;
+			elements.mockNotice.hidden = !enabled;
+			if (enabled && state.feedAvailable) {
+				elements.cameraStatus.textContent = 'Mock stream active';
+			}
+		}
+
+		function displayName(person) {
+			return person.name || person.friendly || person.uid;
+		}
+
+		function filteredPeople() {
+			const filter = state.filter.trim().toLowerCase();
+			if (!filter) {
+				return state.people;
+			}
+
+			return state.people.filter((person) => {
+				return [
+					person.uid,
+					person.name,
+					person.friendly,
+					person.allowed ? 'allowed' : 'denied',
+				].some((value) => String(value || '').toLowerCase().includes(filter));
 			});
 		}
-	},
-	mounted(){
-		this.populate();
-	}
-})
+
+		function renderPeople() {
+			const people = filteredPeople();
+			elements.peopleList.replaceChildren();
+			elements.peopleCount.textContent = `${state.people.length} ${state.people.length === 1 ? 'user' : 'users'}`;
+
+			if (!people.length) {
+				const empty = document.createElement('div');
+				empty.className = 'empty';
+				empty.textContent = state.people.length ? 'No matching people' : 'No people enrolled';
+				elements.peopleList.append(empty);
+				return;
+			}
+
+			for (const person of people) {
+				const fragment = elements.template.content.cloneNode(true);
+				const row = fragment.querySelector('.person');
+				const image = fragment.querySelector('.person-image');
+				const input = fragment.querySelector('.name-input');
+				const id = fragment.querySelector('.person-id');
+				const access = fragment.querySelector('.access');
+				const accessLabel = fragment.querySelector('.access-label');
+				const accessInput = fragment.querySelector('.access-input');
+				const deleteButton = fragment.querySelector('.delete-button');
+
+				row.dataset.uid = person.uid;
+				image.src = `/image/${encodeURIComponent(person.uid)}`;
+				image.alt = displayName(person);
+				input.value = displayName(person);
+				input.dataset.originalValue = input.value;
+				id.textContent = person.uid;
+				access.classList.toggle('is-allowed', Boolean(person.allowed));
+				accessLabel.textContent = person.allowed ? 'Allowed' : 'Denied';
+				accessInput.checked = Boolean(person.allowed);
+
+				input.addEventListener('keydown', (event) => {
+					if (event.key === 'Enter') {
+						input.blur();
+					}
+					if (event.key === 'Escape') {
+						input.value = input.dataset.originalValue;
+						input.blur();
+					}
+				});
+
+				input.addEventListener('blur', () => {
+					const value = input.value.trim();
+					if (value !== input.dataset.originalValue) {
+						saveName(person.uid, value);
+					}
+				});
+
+				accessInput.addEventListener('change', () => {
+					toggleAccess(person.uid, accessInput);
+				});
+
+				deleteButton.addEventListener('click', () => {
+					deletePerson(person.uid, displayName(person));
+				});
+
+				elements.peopleList.append(fragment);
+			}
+		}
+
+		async function requestJson(url, options) {
+			const response = await fetch(url, {
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				...options,
+			});
+
+			if (!response.ok) {
+				throw new Error(`${response.status} ${response.statusText}`);
+			}
+
+			const contentType = response.headers.get('content-type') || '';
+			if (contentType.includes('application/json')) {
+				return response.json();
+			}
+
+			return response.text();
+		}
+
+		async function loadPeople() {
+			if (state.loading) {
+				return;
+			}
+
+			state.loading = true;
+			elements.refreshButton.disabled = true;
+			setServiceStatus('checking', 'Refreshing');
+
+			try {
+				const people = await requestJson('/names');
+				state.people = Array.isArray(people) ? people : [];
+				setNotice('');
+				setServiceStatus('online', 'Online');
+				renderPeople();
+			} catch (error) {
+				setNotice(`Could not load people: ${error.message}`);
+				setServiceStatus('error', 'Service error');
+			} finally {
+				state.loading = false;
+				elements.refreshButton.disabled = false;
+			}
+		}
+
+		async function loadStatus() {
+			try {
+				const status = await requestJson('/status');
+				setMockMode(Boolean(status.mockMode));
+			} catch (error) {
+				setMockMode(false);
+			}
+		}
+
+		async function toggleAccess(uid, checkbox) {
+			checkbox.disabled = true;
+			try {
+				await requestJson('/access', {
+					method: 'POST',
+					body: JSON.stringify({ uid }),
+				});
+				await loadPeople();
+			} catch (error) {
+				setNotice(`Could not update access: ${error.message}`);
+				checkbox.checked = !checkbox.checked;
+				renderPeople();
+			}
+		}
+
+		async function saveName(uid, name) {
+			try {
+				await requestJson('/set', {
+					method: 'POST',
+					body: JSON.stringify({ uid, name }),
+				});
+				await loadPeople();
+			} catch (error) {
+				setNotice(`Could not save name: ${error.message}`);
+				await loadPeople();
+			}
+		}
+
+		async function deletePerson(uid, name) {
+			if (!window.confirm(`Delete ${name}?`)) {
+				return;
+			}
+
+			try {
+				await requestJson('/delete', {
+					method: 'POST',
+					body: JSON.stringify([uid]),
+				});
+				await loadPeople();
+			} catch (error) {
+				setNotice(`Could not delete person: ${error.message}`);
+			}
+		}
+
+		elements.refreshButton.addEventListener('click', loadPeople);
+		elements.searchInput.addEventListener('input', (event) => {
+			state.filter = event.target.value;
+			renderPeople();
+		});
+		elements.clearSearchButton.addEventListener('click', () => {
+			state.filter = '';
+			elements.searchInput.value = '';
+			renderPeople();
+		});
+
+		elements.mainView.addEventListener('load', () => {
+			setFeedAvailable(true, state.mockMode ? 'Mock stream active' : 'Stream connected');
+		});
+		elements.mainView.addEventListener('error', () => {
+			setFeedAvailable(false, '');
+		});
+
+		loadStatus();
+		loadPeople();
+		window.setInterval(() => {
+			loadStatus();
+			loadPeople();
+		}, 15000);
 	</script>
 </body>
+</html>

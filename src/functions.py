@@ -233,6 +233,7 @@ async def videoProcessing(identifier, imshow=False):
 
 	print('started video stream')
 	await asyncio.sleep(0.1)
+	last_camera_error = None
 
 	while True:
 		await asyncio.sleep(0.1)
@@ -242,8 +243,13 @@ async def videoProcessing(identifier, imshow=False):
 		try:
 			frame = camera.capture_array()
 		except Exception as e:
-			print(e)
+			error = str(e)
+			if error != last_camera_error:
+				print(e)
+				last_camera_error = error
+			identifier.setNoFeed('No camera feed')
 			continue
+		last_camera_error = None
 
 		scaled = cv2.resize(frame, None, fx=0.5, fy=0.5)
 
