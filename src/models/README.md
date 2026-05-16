@@ -32,17 +32,17 @@ Use `src/train_identity_model.py` on the Raspberry Pi to capture face samples
 and export a small TensorFlow Lite identity classifier:
 
 ```sh
-cd /home/declan/Facial-Recognition-Door-Lock-mediapipe
-. /home/declan/conda-envs/fr-doorlock-py312/bin/activate
+cd "$HOME/Facial-Recognition-Door-Lock"
+. "$HOME/conda-envs/fr-doorlock-py312/bin/activate"
 
-python src/train_identity_model.py capture --person declan --samples 60
+python src/train_identity_model.py capture --person user1 --samples 60
 python src/train_identity_model.py train --allow-new
 ```
 
 Or capture one person and immediately train:
 
 ```sh
-python src/train_identity_model.py capture-train --person declan --samples 60 --allow-new
+python src/train_identity_model.py capture-train --person user1 --samples 60 --allow-new
 ```
 
 The script writes:
