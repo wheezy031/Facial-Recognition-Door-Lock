@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-PYTHON_BIN="${PYTHON_BIN:-/home/declan/conda-envs/fr-doorlock-py312/bin/python}"
+REPO_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PYTHON_BIN="${PYTHON_BIN:-${DOORLOCK_PYTHON_BIN:-$REPO_DIR/.venv/bin/python}}"
 
 if [ ! -x "$PYTHON_BIN" ]; then
 	echo "Python not found or not executable: $PYTHON_BIN"

@@ -449,7 +449,7 @@ def capture_train_command(args):
 
 
 def add_shared_capture_args(parser):
-	parser.add_argument('person', help='person label, for example declan')
+	parser.add_argument('person', help='person label, for example user1')
 	parser.add_argument('--samples', type=int, default=60)
 	parser.add_argument('--interval', type=float, default=0.25)
 	parser.add_argument('--dataset-dir', type=Path, default=DEFAULT_DATASET_DIR)

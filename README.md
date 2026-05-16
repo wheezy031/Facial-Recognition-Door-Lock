@@ -90,7 +90,7 @@ cd Facial-Recognition-Door-Lock
 On Raspberry Pi 64-bit systems, use a Python 3.12 environment for MediaPipe:
 
 ```bash
-DOORLOCK_PYTHON_BIN=/home/declan/conda-envs/fr-doorlock-py312/bin/python ./setup.sh
+DOORLOCK_PYTHON_BIN="$HOME/conda-envs/fr-doorlock-py312/bin/python" ./setup.sh
 ```
 
 Download the MobileFaceNet embedding model from the `face_detection_tflite`
@@ -107,15 +107,40 @@ The file should be about 5.2 MB. Keep it named `face_embedder.tflite`, or set
 Do not use the `face_detection_*.tflite` files here; MediaPipe already handles
 face detection, and this project needs an embedding model for identity matching.
 
-The camera loop tries Picamera2 first, then falls back to `rpicam-vid`/`libcamera-vid`.
+### Camera Backend
+
+Choose one camera backend before starting the service. The default is the
+Raspberry Pi camera backend:
+
+```bash
+DOORLOCK_CAMERA_BACKEND="auto"
+```
+
+#### Raspberry Pi Camera
+
+For the Raspberry Pi Camera Module, leave `DOORLOCK_CAMERA_BACKEND` as `auto`.
+The app tries Picamera2 first, then falls back to `rpicam-vid`/`libcamera-vid`.
+
 When running the app from a conda Python environment, the command-line camera
-backend is usually the most reliable option:
+backend is usually the most reliable option, because it avoids importing
+Picamera2 into the conda Python process:
 
 ```bash
 sudo apt-get install -y --no-install-recommends rpicam-apps
 ```
 
-For a USB webcam, switch the camera backend to OpenCV and set the camera index:
+To force the Pi camera command-line backend:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_BACKEND="rpicam"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+#### USB Webcam
+
+For a USB webcam, switch the camera backend to OpenCV and set the camera index.
+The default index is usually `0`:
 
 ```bash
 sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d;/^DOORLOCK_CAMERA_INDEX=/d;/^DOORLOCK_CAMERA_DEVICE=/d;/^DOORLOCK_CAMERA_FOURCC=/d' /etc/default/doorlock
@@ -126,7 +151,9 @@ sudo /etc/init.d/doorlock restart
 If index `0` is not the USB camera, test available indexes:
 
 ```bash
-/home/declan/conda-envs/fr-doorlock-py312/bin/python - <<'PY'
+DOORLOCK_PYTHON="$HOME/conda-envs/fr-doorlock-py312/bin/python"
+
+"$DOORLOCK_PYTHON" - <<'PY'
 import cv2
 
 for index in range(5):
@@ -145,6 +172,8 @@ printf 'DOORLOCK_CAMERA_BACKEND="opencv"\nDOORLOCK_CAMERA_DEVICE="/dev/video0"\n
 sudo /etc/init.d/doorlock restart
 ```
 
+#### Stream Quality
+
 The recognition loop can process a smaller frame while the web UI streams the
 full camera frame. If the live feed looks jagged, keep the stream at full scale:
 
@@ -152,6 +181,8 @@ full camera frame. If the live feed looks jagged, keep the stream at full scale:
 printf 'DOORLOCK_PROCESSING_SCALE="0.5"\nDOORLOCK_STREAM_SCALE="1.0"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
+
+#### Mock Camera
 
 To run the web interface without a camera attached, switch to the mock camera
 backend:
