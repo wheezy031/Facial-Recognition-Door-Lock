@@ -23,9 +23,36 @@ APP_DIR = Path(__file__).resolve().parent
 app = Sanic(__name__)
 
 
+def truthy(value):
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
+
+def camera_backend():
+    backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'auto').strip().lower()
+    if truthy(os.environ.get('DOORLOCK_DISABLE_CAMERA', '')):
+        backend = 'mock'
+    return backend
+
+
+def stream_response(streaming_fn, content_type):
+    if hasattr(sanic_response, 'stream'):
+        return sanic_response.stream(streaming_fn, content_type=content_type)
+    return sanic_response.ResponseStream(streaming_fn, content_type=content_type)
+
+
 @app.route('/')
 async def index(request):
     return await sanic_response.file(str(APP_DIR / 'index' / 'index.html'))
+
+
+@app.route('/status')
+async def status(request):
+    backend = camera_backend()
+    return sanic_response.json({
+        'cameraBackend': backend,
+        'mockMode': backend in ('mock', 'none', 'disabled'),
+        'port': int(os.environ.get('DOORLOCK_PORT', '80')),
+    })
 
 
 @app.route('/image/<uid>')
@@ -91,7 +118,10 @@ async def set(request):
 # mainview image stream
 @app.route('/mainview')
 async def view(request):
-    return sanic_response.stream(request.app.ctx.identifier.stream, content_type='multipart/x-mixed-replace; boundary=frame')
+    return stream_response(
+        request.app.ctx.identifier.stream,
+        content_type='multipart/x-mixed-replace; boundary=frame',
+    )
 
 
 @app.listener('before_server_start')

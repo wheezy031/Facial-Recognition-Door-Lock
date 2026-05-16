@@ -1,4 +1,5 @@
 from pathlib import Path
+import asyncio
 import random
 import string
 
@@ -12,13 +13,63 @@ APP_DIR = Path(__file__).resolve().parent
 PEOPLE_DIR = APP_DIR / 'people'
 
 
+def no_camera_frame(message='No camera feed'):
+	frame = np.full((720, 1280, 3), (33, 39, 48), dtype=np.uint8)
+	center_x = frame.shape[1] // 2
+	center_y = frame.shape[0] // 2 - 28
+
+	cv2.rectangle(
+		frame,
+		(center_x - 118, center_y - 70),
+		(center_x + 80, center_y + 70),
+		(190, 199, 211),
+		6,
+		cv2.LINE_AA,
+	)
+	cv2.rectangle(
+		frame,
+		(center_x + 80, center_y - 34),
+		(center_x + 148, center_y + 34),
+		(190, 199, 211),
+		6,
+		cv2.LINE_AA,
+	)
+	cv2.circle(frame, (center_x - 20, center_y), 34, (190, 199, 211), 6, cv2.LINE_AA)
+
+	cv2.putText(
+		frame,
+		message,
+		(center_x - 185, center_y + 145),
+		cv2.FONT_HERSHEY_SIMPLEX,
+		1.15,
+		(230, 235, 241),
+		3,
+		cv2.LINE_AA,
+	)
+	cv2.putText(
+		frame,
+		'Waiting for camera frames',
+		(center_x - 190, center_y + 190),
+		cv2.FONT_HERSHEY_SIMPLEX,
+		0.75,
+		(150, 160, 174),
+		2,
+		cv2.LINE_AA,
+	)
+
+	ret, jpeg = cv2.imencode('.jpg', frame)
+	if not ret:
+		return bytes()
+	return jpeg.tobytes()
+
+
 def _truthy(value):
 	return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
 
 
 class Identifier:
 	def __init__(self):
-		self.view = bytes()
+		self.view = no_camera_frame()
 		self.encodings = {}
 		self.exit = False
 		self.friendly_names = {}
@@ -97,7 +148,12 @@ class Identifier:
 		return encoding
 
 	def setView(self, view):
+		if hasattr(view, 'tobytes'):
+			view = view.tobytes()
 		self.view = view
+
+	def setNoFeed(self, message='No camera feed'):
+		self.view = no_camera_frame(message)
 
 	def quit(self):
 		self.exit = True
@@ -107,6 +163,7 @@ class Identifier:
 		while True:
 			r = b''.join([b'--frame\r\nContent-Type:image/jpeg\r\n\r\n', self.view, b'\r\n'])
 			await response.write(r)
+			await asyncio.sleep(0.1)
 
 	def toggleAccess(self, uid):
 		if uid not in self.encodings.keys():
