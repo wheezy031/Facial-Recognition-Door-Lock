@@ -50,8 +50,13 @@ async def status(request):
     backend = camera_backend()
     return sanic_response.json({
         'cameraBackend': backend,
+        'cameraDevice': os.environ.get('DOORLOCK_CAMERA_DEVICE', ''),
+        'cameraFourcc': os.environ.get('DOORLOCK_CAMERA_FOURCC', 'MJPG'),
+        'cameraIndex': int(os.environ.get('DOORLOCK_CAMERA_INDEX', '0')),
         'mockMode': backend in ('mock', 'none', 'disabled'),
         'port': int(os.environ.get('DOORLOCK_PORT', '80')),
+        'processingScale': float(os.environ.get('DOORLOCK_PROCESSING_SCALE', '0.5')),
+        'streamScale': float(os.environ.get('DOORLOCK_STREAM_SCALE', '1.0')),
     })
 
 
@@ -131,13 +136,20 @@ async def server_prepare(app):
 
 @app.listener('after_server_start')
 async def server_start(app):
-    asyncio.create_task(videoProcessing(app.ctx.identifier, False))
+    app.ctx.video_task = asyncio.create_task(videoProcessing(app.ctx.identifier, False))
 
 
 @app.listener('before_server_stop')
 async def server_stop(app):
     if hasattr(app.ctx, 'identifier'):
         app.ctx.identifier.quit()
+    task = getattr(app.ctx, 'video_task', None)
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     close_relay()
 
 

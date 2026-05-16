@@ -29,6 +29,17 @@ print("mediapipe", mp.__version__)
 camera_backend = os.environ.get("DOORLOCK_CAMERA_BACKEND", "auto")
 if camera_backend == "mock":
     print("camera backend mock")
+elif camera_backend in ("opencv", "usb", "v4l2"):
+    device = os.environ.get("DOORLOCK_CAMERA_DEVICE")
+    source = device or int(os.environ.get("DOORLOCK_CAMERA_INDEX", "0"))
+    cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+    fourcc = os.environ.get("DOORLOCK_CAMERA_FOURCC", "MJPG")
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc[:4]))
+    ok, frame = cap.read()
+    print("opencv camera", source, "opened", cap.isOpened(), "frame", ok)
+    if frame is not None:
+        print("opencv frame shape", frame.shape, "mean", float(frame.mean()))
+    cap.release()
 else:
     camera_command = shutil.which("rpicam-vid") or shutil.which("libcamera-vid")
     if camera_command:
