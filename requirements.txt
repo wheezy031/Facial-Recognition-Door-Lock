@@ -1,0 +1,6 @@
+sanic
+numpy
+gpiozero
+lgpio
+mediapipe==0.10.18
+ai-edge-litert==2.1.5
