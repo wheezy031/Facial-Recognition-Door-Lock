@@ -1,9 +1,20 @@
 from pathlib import Path
-import numpy as np
-import face_recognition as fr
+import random
+import string
 
-import base64, string, random
 import cv2
+import numpy as np
+
+from recognizer import FaceRecognizer
+
+
+APP_DIR = Path(__file__).resolve().parent
+PEOPLE_DIR = APP_DIR / 'people'
+
+
+def _truthy(value):
+	return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
 
 class Identifier:
 	def __init__(self):
@@ -12,33 +23,30 @@ class Identifier:
 		self.exit = False
 		self.friendly_names = {}
 		self.allowed = []
+		self.people_dir = PEOPLE_DIR
+		self.recognizer = FaceRecognizer()
+
 		print('loading known people')
-		#load known people
-		p = Path('people')
+		p = self.people_dir
 		if not (p.exists() and p.is_dir()):
-			print(p,'does not exsist as a directory, aborting')
+			print(p, 'does not exist as a directory, aborting')
 			exit()
 
-		for fn in p.glob('*.jpg'):
-			name = fn.stem #filename without extensio
-			img = cv2.imread(str(fn))
-			print('>>',name)
+		for fn in sorted(p.glob('*.jpg')):
+			name = fn.stem
+			print('>>', name)
+			encoding = self._load_or_create_encoding(fn)
+			if encoding is None:
+				print('failed to load', fn)
+				continue
+			self.encodings[name] = encoding
 
-			try:
-				self.encodings[name] = fr.face_encodings(img)[0]
-			except Exception as e:
-				print('failed to load',fn)
-				print('reason:')
-				print(e)
-	
-		# weird pathlib syntax
-		p = p / 'meta.txt'
-	
-		if not(p.exists() and p.is_file()):
-			print(p,'does not exist as a file, empty or otherwise')
+		meta = p / 'meta.txt'
+		if not (meta.exists() and meta.is_file()):
+			print(meta, 'does not exist as a file, empty or otherwise')
 			exit()
-		
-		for line in p.open('r').readlines():
+
+		for line in meta.open('r').readlines():
 			line = line.strip()
 			if line == '':
 				continue
@@ -47,9 +55,9 @@ class Identifier:
 			uid, access = line[0], line[1]
 
 			if uid not in self.encodings.keys():
-				print('err: no image for',uid)
+				print('err: no image for', uid)
 				continue
-			if bool(access):
+			if _truthy(access):
 				self.allowed.append(uid)
 
 			if len(line) > 2:
@@ -57,11 +65,43 @@ class Identifier:
 
 		print('loaded data')
 
+	def _load_or_create_encoding(self, image_path):
+		encoding_path = image_path.with_suffix('.npy')
+		if encoding_path.exists() and encoding_path.is_file():
+			try:
+				encoding = np.load(str(encoding_path)).astype(np.float32)
+				norm = np.linalg.norm(encoding)
+				if norm != 0:
+					encoding = encoding / norm
+				return encoding
+			except Exception as e:
+				print('failed to load cached encoding', encoding_path)
+				print('reason:')
+				print(e)
+
+		img = cv2.imread(str(image_path))
+		if img is None:
+			print('failed to read', image_path)
+			return None
+
+		try:
+			encoding = self.recognizer.embedding_from_image(img)
+		except Exception as e:
+			print('failed to create embedding for', image_path)
+			print('reason:')
+			print(e)
+			return None
+
+		if encoding is not None:
+			np.save(str(encoding_path), encoding)
+		return encoding
+
 	def setView(self, view):
 		self.view = view
 
 	def quit(self):
 		self.exit = True
+		self.recognizer.close()
 
 	async def stream(self, response):
 		while True:
@@ -69,9 +109,9 @@ class Identifier:
 			await response.write(r)
 
 	def toggleAccess(self, uid):
-		if not uid in self.encodings.keys():
+		if uid not in self.encodings.keys():
 			return 'unknown user'
-	
+
 		if uid in self.allowed:
 			self.allowed.remove(uid)
 		else:
@@ -88,93 +128,104 @@ class Identifier:
 			return True
 		return False
 
-	def saveMeta(self, fn = 'people/meta.txt'):
-		p = Path(fn)
+	def displayName(self, uid):
+		return self.friendly_names.get(uid, uid)
+
+	def saveMeta(self, fn=None):
+		p = Path(fn) if fn else self.people_dir / 'meta.txt'
 		with p.open('w') as f:
 			for user in self.encodings.keys():
 				allowed = user in self.allowed
-				try:
-					name = self.friendly_names[user]
-				except KeyError:
-					name = ''
-				f.write('{},{},{}\n'.format(user,allowed,name))
-
+				name = self.friendly_names.get(user, '')
+				f.write('{},{},{}\n'.format(user, allowed, name))
 
 	def addNew(self, thumbnail, encoding):
-		# generate random uid 8 char long
 		c = string.ascii_uppercase + string.ascii_lowercase + string.digits
-		
+
 		uid = ''.join(random.choice(c) for _ in range(8))
-		while uid in self.encodings.keys(): #regenerate just incase we have same id, slim chance
+		while uid in self.encodings.keys():
 			uid = ''.join(random.choice(c) for _ in range(8))
 
 		self.encodings[uid] = encoding
-		cv2.imwrite('people/{}.jpg'.format(uid),thumbnail)
+		cv2.imwrite(str(self.people_dir / '{}.jpg'.format(uid)), thumbnail)
+		np.save(str(self.people_dir / '{}.npy'.format(uid)), encoding)
+		self.saveMeta()
 
 		return uid
+
 	def setName(self, uid, name):
 		if uid not in self.encodings.keys():
 			return False
 		if name:
 			self.friendly_names[uid] = name
 		else:
-			del self.friendly_names[uid]
+			self.friendly_names.pop(uid, None)
 		self.saveMeta()
 		return True
-		
+
 	def getNames(self):
 		ret = []
 		for uid in self.encodings.keys():
-			if uid in self.friendly_names.keys():
-				friendly = self.friendly_names[uid]
-			else:
-				friendly = None
+			friendly = self.friendly_names.get(uid)
 			ret.append({
-				'uid' : uid,
-				'friendly' : friendly,
-				'name' : friendly or uid, 
-				'allowed' : True if uid in self.allowed else False
+				'uid': uid,
+				'friendly': friendly,
+				'name': friendly or uid,
+				'allowed': True if uid in self.allowed else False
 			})
 		print(ret)
 		return ret
 
-	def delete(self,uid):
-		if not uid in self.encodings.keys():
+	def delete(self, uid):
+		if uid not in self.encodings.keys():
 			return None
 
 		del self.encodings[uid]
-		p = Path('people/{}.jpg'.format(uid))
-		if p.exists() and p.is_file():
-			p.unlink()
-	
-	def getImageLocation(self, uid):
-		if not uid in self.encodings.keys():
-			return None
-		return 'people/{}.jpg'.format(uid)
+		if uid in self.allowed:
+			self.allowed.remove(uid)
+		self.friendly_names.pop(uid, None)
 
-	def getIDFromEncoding(self, encoding, difference=0.6):
-	
+		for suffix in ('.jpg', '.npy'):
+			p = self.people_dir / '{}{}'.format(uid, suffix)
+			if p.exists() and p.is_file():
+				p.unlink()
+
+		self.saveMeta()
+
+	def getImageLocation(self, uid):
+		if uid not in self.encodings.keys():
+			return None
+		return str(self.people_dir / '{}.jpg'.format(uid))
+
+	def getIDFromEncoding(self, encoding, difference=None):
+		if not self.encodings:
+			print('no known users loaded')
+			return None
+
+		if difference is None:
+			difference = self.recognizer.threshold
+
 		other_encodings = list(self.encodings.values())
-		distances = fr.face_distance(other_encodings, encoding)
-		
+		distances = [self.recognizer.distance(other, encoding) for other in other_encodings]
+
 		if not any([d <= difference for d in distances]):
-			#this is a new face that we haven't seen before
-			# so save it
 			print('no user found')
 			return None
 
-		most_similar = np.argmin(distances)
+		most_similar = int(np.argmin(distances))
+		uid = list(self.encodings.keys())[most_similar]
+		distance = distances[most_similar]
 
-		uid = list(self.encodings.keys())[most_similar] 
-
-		#output debug statement
-		print(uid, ' user, with accuracy {:.1%}'.format(1-distances[most_similar]))
-		
-		#change up this person's encoding a little bit, so we can trend towards true average
+		print(uid, ' user, with similarity {:.1%}'.format(1 - distance))
 
 		self.encodings[uid] = np.average(
-				[ encoding, self.encodings[uid] ],
-				axis=0, weights=[1, 2]) # give more weight to the known values
+			[encoding, self.encodings[uid]],
+			axis=0,
+			weights=[1, 2],
+		)
+		norm = np.linalg.norm(self.encodings[uid])
+		if norm != 0:
+			self.encodings[uid] = self.encodings[uid] / norm
+		np.save(str(self.people_dir / '{}.npy'.format(uid)), self.encodings[uid])
 
 		return uid
-

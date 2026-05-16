@@ -73,7 +73,7 @@ The general schematic to the design is below. This design uses the [XC4514](http
 
 ![schematic](images/schematic.png)
 
-To control the relay, we use the RPi Camera running facial recognition code, from the `face_recognition` library by [@ageitgeu](https://github.com/ageitgey/face_recognition) and our additions below.
+To control the relay, we use the RPi Camera running MediaPipe face detection and a TensorFlow Lite face embedding model.
 
 ## Programming
 
@@ -87,6 +87,49 @@ cd Facial-Recognition-Door-Lock
 ./setup.sh
 ```
 
+On Raspberry Pi 64-bit systems, use a Python 3.12 environment for MediaPipe:
+
+```bash
+DOORLOCK_PYTHON_BIN=/home/declan/conda-envs/fr-doorlock-py312/bin/python ./setup.sh
+```
+
+Download the MobileFaceNet embedding model from the `face_detection_tflite`
+GitHub repository and place it where the service expects it:
+
+```bash
+mkdir -p src/models
+curl -L -o src/models/face_embedder.tflite \
+  https://raw.githubusercontent.com/hugocornellier/face_detection_tflite/main/assets/models/mobilefacenet.tflite
+```
+
+The file should be about 5.2 MB. Keep it named `face_embedder.tflite`, or set
+`DOORLOCK_EMBEDDING_MODEL` to another model path before starting the service.
+Do not use the `face_detection_*.tflite` files here; MediaPipe already handles
+face detection, and this project needs an embedding model for identity matching.
+
+The camera loop tries Picamera2 first, then falls back to `rpicam-vid`/`libcamera-vid`.
+When running the app from a conda Python environment, the command-line camera
+backend is usually the most reliable option:
+
+```bash
+sudo apt-get install -y --no-install-recommends rpicam-apps
+```
+
+To run the web interface without a camera attached, switch to the mock camera
+backend:
+
+```bash
+sudo sed -i 's/^DOORLOCK_CAMERA_BACKEND=.*/DOORLOCK_CAMERA_BACKEND="mock"/' /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+Switch back to the real camera backend after attaching the camera:
+
+```bash
+sudo sed -i 's/^DOORLOCK_CAMERA_BACKEND=.*/DOORLOCK_CAMERA_BACKEND="auto"/' /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
 This should set everything up for you and reboot the pi when it is finished.
 
 While it's running, feel free to go through the [Assembly Instructions](#Assembly-Instructions) and build the rest of the housing before placing the rpi in.
@@ -95,7 +138,7 @@ Note: **Make sure to jot down the IP address through the `ifconfig` command.** T
 
 ### Source code discussion
 
-The code itself is easy enough to follow and has 3 main parts:
+The code itself is easy enough to follow and has 4 main parts:
 
 - `doorlock.py`
   - This is the script that pulls it all together and creates a webserver that you can issue commands to/from.
@@ -103,6 +146,8 @@ The code itself is easy enough to follow and has 3 main parts:
   - is the script which outlines the functions for access granted, denied, and contains the main camera/detect loop. This is the script that contains the GPIO controlling code.
 - `identifier.py`
   - This is the python object that manages the user identities, such as who is allowed in and what they look like
+- `recognizer.py`
+  - This uses MediaPipe to detect faces and a TensorFlow Lite embedding model to compare identities.
 
 We've commented the code as much as possible, so check out the scripts and get a feel for what's happening if you want to modify any of the program.
 
@@ -209,5 +254,5 @@ Below is a list of items we'd like to see in the project, but haven't had time t
 | [#9 ](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/9)  | Client should see new user ids as they are scanned                                                                              | Intermediate |
 | [#10](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/10) | Show the name on the screen when the face is detected                                                                           | Beginner     |
 | [#11](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/11) | Improve the stream on the web interface (hint look at our [pan-tilt camera](https://www.jaycar.com.au/pan-tilt-camera) project) | Intermediate |
-| [#12](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/12) | Improve the speed of the `face_recognition` library. dlib is too slow.                                                          | Advanced     |
+| [#12](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/12) | Improve the speed of the face recognition pipeline.                                                                              | Advanced     |
 | [#13](https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock/issues/13) | Merge username / IDs                                                                                                            | Intermediate |
