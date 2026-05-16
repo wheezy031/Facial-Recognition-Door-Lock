@@ -28,7 +28,7 @@ def truthy(value):
 
 
 def camera_backend():
-    backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'auto').strip().lower()
+    backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'rpicam').strip().lower()
     if truthy(os.environ.get('DOORLOCK_DISABLE_CAMERA', '')):
         backend = 'mock'
     return backend
@@ -101,6 +101,34 @@ async def delete(request):
         return sanic_response.text('called delete')
 
     return sanic_response.text('must use POST request')
+
+
+# merge duplicate detected people into a single identity
+@app.route('/merge', methods=['POST'])
+async def merge(request):
+    data = request.json
+    if data is None or type(data) is not dict:
+        return sanic_response.json({'ok': False, 'error': 'wrong data'}, status=400)
+
+    target = data.get('target')
+    sources = data.get('sources')
+    uids = data.get('uids')
+
+    if sources is None and isinstance(uids, list):
+        if target is None and uids:
+            target = uids[0]
+        sources = [uid for uid in uids if uid != target]
+
+    if not isinstance(sources, list):
+        return sanic_response.json({'ok': False, 'error': 'sources must be a list'}, status=400)
+    if not isinstance(target, str):
+        return sanic_response.json({'ok': False, 'error': 'target must be a person id'}, status=400)
+    if any(not isinstance(uid, str) for uid in sources):
+        return sanic_response.json({'ok': False, 'error': 'sources must contain person ids'}, status=400)
+
+    result = request.app.ctx.identifier.merge(target, sources)
+    return sanic_response.json(result, status=200 if result.get('ok') else 400)
+
 
 # provide JSON of names, and friendly names
 @app.route('/names')

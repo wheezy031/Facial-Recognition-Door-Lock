@@ -234,7 +234,7 @@ class MockCamera:
 		)
 		cv2.putText(
 			frame,
-			'Set DOORLOCK_CAMERA_BACKEND=auto when camera is attached',
+			'Set DOORLOCK_CAMERA_BACKEND=rpicam when camera is attached',
 			(40, 130),
 			cv2.FONT_HERSHEY_SIMPLEX,
 			0.8,
@@ -259,7 +259,7 @@ class MockCamera:
 
 
 def open_camera(size=(1280, 720)):
-	backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'auto').strip().lower()
+	backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'rpicam').strip().lower()
 	if truthy(os.environ.get('DOORLOCK_DISABLE_CAMERA', '')):
 		backend = 'mock'
 

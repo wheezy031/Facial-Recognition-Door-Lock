@@ -1,6 +1,7 @@
 from pathlib import Path
 import asyncio
 import random
+import shutil
 import string
 
 import cv2
@@ -258,6 +259,76 @@ class Identifier:
 		if uid not in self.encodings.keys():
 			return None
 		return str(self.people_dir / '{}.jpg'.format(uid))
+
+	def merge(self, target, sources):
+		if not target or target not in self.encodings:
+			return {'ok': False, 'error': 'unknown merge target'}
+
+		unique_sources = []
+		for uid in sources:
+			if uid == target or uid in unique_sources:
+				continue
+			unique_sources.append(uid)
+		sources = unique_sources
+
+		if not sources:
+			return {'ok': False, 'error': 'choose at least one source person'}
+
+		missing = [uid for uid in sources if uid not in self.encodings]
+		if missing:
+			return {'ok': False, 'error': 'unknown source person: {}'.format(', '.join(missing))}
+
+		merged_ids = [target] + sources
+		merged = np.mean(
+			np.stack([self.encodings[uid] for uid in merged_ids]),
+			axis=0,
+		).astype(np.float32)
+		norm = np.linalg.norm(merged)
+		if norm != 0:
+			merged = merged / norm
+		self.encodings[target] = merged
+		np.save(str(self.people_dir / '{}.npy'.format(target)), merged)
+
+		if target not in self.friendly_names:
+			for uid in sources:
+				if uid in self.friendly_names:
+					self.friendly_names[target] = self.friendly_names[uid]
+					break
+
+		any_allowed = any(uid in self.allowed for uid in merged_ids)
+		for uid in sources:
+			if uid in self.allowed:
+				self.allowed.remove(uid)
+			self.friendly_names.pop(uid, None)
+
+		if any_allowed and target not in self.allowed:
+			self.allowed.append(target)
+		if not any_allowed and target in self.allowed:
+			self.allowed.remove(target)
+
+		target_image = self.people_dir / '{}.jpg'.format(target)
+		if not target_image.exists():
+			for uid in sources:
+				source_image = self.people_dir / '{}.jpg'.format(uid)
+				if source_image.exists():
+					shutil.copyfile(str(source_image), str(target_image))
+					break
+
+		for uid in sources:
+			del self.encodings[uid]
+			for suffix in ('.jpg', '.npy'):
+				path = self.people_dir / '{}{}'.format(uid, suffix)
+				if path.exists() and path.is_file():
+					path.unlink()
+
+		self.saveMeta()
+		return {
+			'ok': True,
+			'target': target,
+			'merged': sources,
+			'allowed': target in self.allowed,
+			'name': self.displayName(target),
+		}
 
 	def getIDFromEncoding(self, encoding, difference=None):
 		if not self.encodings:

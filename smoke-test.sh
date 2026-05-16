@@ -27,7 +27,7 @@ print("cv2", cv2.__version__)
 import mediapipe as mp
 print("mediapipe", mp.__version__)
 
-camera_backend = os.environ.get("DOORLOCK_CAMERA_BACKEND", "auto")
+camera_backend = os.environ.get("DOORLOCK_CAMERA_BACKEND", "rpicam")
 if camera_backend == "mock":
     print("camera backend mock")
 elif camera_backend in ("opencv", "usb", "v4l2"):

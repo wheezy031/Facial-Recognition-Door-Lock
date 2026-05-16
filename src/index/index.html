@@ -36,7 +36,8 @@
 		}
 
 		button,
-		input {
+		input,
+		select {
 			font: inherit;
 		}
 
@@ -45,7 +46,8 @@
 		}
 
 		button:disabled,
-		input:disabled {
+		input:disabled,
+		select:disabled {
 			cursor: not-allowed;
 			opacity: 0.62;
 		}
@@ -294,6 +296,44 @@
 			background: #fbfcfe;
 		}
 
+		.merge-bar {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+			padding: 12px 18px;
+			border-bottom: 1px solid var(--line);
+			background: #eef5ff;
+		}
+
+		.merge-bar[hidden] {
+			display: none;
+		}
+
+		.merge-count {
+			font-weight: 750;
+			color: var(--accent-strong);
+		}
+
+		.merge-target {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			color: var(--muted);
+			font-size: 13px;
+			font-weight: 650;
+		}
+
+		.merge-select {
+			min-height: 38px;
+			min-width: 180px;
+			padding: 7px 10px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: #ffffff;
+			color: var(--text);
+		}
+
 		.search {
 			width: 100%;
 			min-height: 38px;
@@ -305,7 +345,8 @@
 		}
 
 		.search:focus,
-		.name-input:focus {
+		.name-input:focus,
+		.merge-select:focus {
 			outline: 3px solid rgba(34, 90, 159, 0.14);
 			border-color: var(--accent);
 		}
@@ -325,6 +366,10 @@
 
 		.person:last-child {
 			border-bottom: 0;
+		}
+
+		.person.is-selected {
+			background: #f5f9ff;
 		}
 
 		.person-image {
@@ -349,7 +394,23 @@
 		}
 
 		.person-name {
+			flex: 1 1 auto;
 			min-width: 0;
+		}
+
+		.select-person {
+			display: inline-flex;
+			align-items: center;
+			gap: 7px;
+			color: var(--muted);
+			font-size: 13px;
+			white-space: nowrap;
+		}
+
+		.select-input {
+			width: 16px;
+			height: 16px;
+			accent-color: var(--accent);
 		}
 
 		.name-input {
@@ -527,6 +588,16 @@
 				grid-template-columns: 1fr;
 			}
 
+			.merge-bar,
+			.merge-target {
+				align-items: stretch;
+				flex-direction: column;
+			}
+
+			.merge-select {
+				width: 100%;
+			}
+
 			.person {
 				grid-template-columns: 64px minmax(0, 1fr);
 				padding: 14px;
@@ -611,6 +682,15 @@
 					<input id="searchInput" class="search" type="search" placeholder="Search people" autocomplete="off">
 					<button id="clearSearchButton" class="btn" type="button">Clear</button>
 				</div>
+				<div id="mergeBar" class="merge-bar" hidden>
+					<span id="mergeCount" class="merge-count">0 selected</span>
+					<label class="merge-target">
+						<span>Merge into</span>
+						<select id="mergeTarget" class="merge-select"></select>
+					</label>
+					<button id="mergeButton" class="btn btn-primary" type="button">Merge</button>
+					<button id="clearSelectionButton" class="btn" type="button">Clear selection</button>
+				</div>
 				<div id="peopleList" class="people-list" aria-live="polite"></div>
 			</section>
 		</main>
@@ -621,6 +701,10 @@
 			<img class="person-image" alt="">
 			<div class="person-main">
 				<div class="person-topline">
+					<label class="select-person">
+						<input class="select-input" type="checkbox">
+						<span>Select</span>
+					</label>
 					<div class="person-name">
 						<input class="name-input" type="text" autocomplete="off">
 						<div class="person-id"></div>
@@ -645,8 +729,11 @@
 			people: [],
 			filter: '',
 			loading: false,
+			merging: false,
 			mockMode: false,
 			feedAvailable: true,
+			selected: new Set(),
+			mergeTarget: '',
 		};
 
 		const elements = {
@@ -657,6 +744,11 @@
 			refreshButton: document.getElementById('refreshButton'),
 			searchInput: document.getElementById('searchInput'),
 			clearSearchButton: document.getElementById('clearSearchButton'),
+			mergeBar: document.getElementById('mergeBar'),
+			mergeCount: document.getElementById('mergeCount'),
+			mergeTarget: document.getElementById('mergeTarget'),
+			mergeButton: document.getElementById('mergeButton'),
+			clearSelectionButton: document.getElementById('clearSelectionButton'),
 			peopleList: document.getElementById('peopleList'),
 			peopleCount: document.getElementById('peopleCount'),
 			template: document.getElementById('personTemplate'),
@@ -693,6 +785,9 @@
 		}
 
 		function displayName(person) {
+			if (!person) {
+				return '';
+			}
 			return person.name || person.friendly || person.uid;
 		}
 
@@ -712,6 +807,51 @@
 			});
 		}
 
+		function selectedPeople() {
+			const knownIds = new Set(state.people.map((person) => person.uid));
+			for (const uid of [...state.selected]) {
+				if (!knownIds.has(uid)) {
+					state.selected.delete(uid);
+				}
+			}
+
+			return state.people.filter((person) => state.selected.has(person.uid));
+		}
+
+		function renderMergeBar() {
+			const selected = selectedPeople();
+			elements.mergeBar.hidden = selected.length < 2;
+			elements.mergeCount.textContent = `${selected.length} selected`;
+			elements.mergeButton.disabled = state.merging || selected.length < 2;
+			elements.mergeTarget.disabled = state.merging;
+			elements.clearSelectionButton.disabled = state.merging;
+
+			if (selected.length < 2) {
+				state.mergeTarget = '';
+				elements.mergeTarget.replaceChildren();
+				return;
+			}
+
+			if (!selected.some((person) => person.uid === state.mergeTarget)) {
+				state.mergeTarget = selected[0].uid;
+			}
+
+			elements.mergeTarget.replaceChildren();
+			for (const person of selected) {
+				const option = document.createElement('option');
+				option.value = person.uid;
+				option.textContent = displayName(person);
+				option.selected = person.uid === state.mergeTarget;
+				elements.mergeTarget.append(option);
+			}
+		}
+
+		function clearSelection() {
+			state.selected.clear();
+			state.mergeTarget = '';
+			renderPeople();
+		}
+
 		function renderPeople() {
 			const people = filteredPeople();
 			elements.peopleList.replaceChildren();
@@ -722,6 +862,7 @@
 				empty.className = 'empty';
 				empty.textContent = state.people.length ? 'No matching people' : 'No people enrolled';
 				elements.peopleList.append(empty);
+				renderMergeBar();
 				return;
 			}
 
@@ -731,20 +872,35 @@
 				const image = fragment.querySelector('.person-image');
 				const input = fragment.querySelector('.name-input');
 				const id = fragment.querySelector('.person-id');
+				const selectInput = fragment.querySelector('.select-input');
 				const access = fragment.querySelector('.access');
 				const accessLabel = fragment.querySelector('.access-label');
 				const accessInput = fragment.querySelector('.access-input');
 				const deleteButton = fragment.querySelector('.delete-button');
 
 				row.dataset.uid = person.uid;
+				row.classList.toggle('is-selected', state.selected.has(person.uid));
 				image.src = `/image/${encodeURIComponent(person.uid)}`;
 				image.alt = displayName(person);
 				input.value = displayName(person);
 				input.dataset.originalValue = input.value;
 				id.textContent = person.uid;
+				selectInput.checked = state.selected.has(person.uid);
 				access.classList.toggle('is-allowed', Boolean(person.allowed));
 				accessLabel.textContent = person.allowed ? 'Allowed' : 'Denied';
 				accessInput.checked = Boolean(person.allowed);
+
+				selectInput.addEventListener('change', () => {
+					if (selectInput.checked) {
+						state.selected.add(person.uid);
+					} else {
+						state.selected.delete(person.uid);
+					}
+					if (!state.selected.has(state.mergeTarget)) {
+						state.mergeTarget = '';
+					}
+					renderPeople();
+				});
 
 				input.addEventListener('keydown', (event) => {
 					if (event.key === 'Enter') {
@@ -773,6 +929,8 @@
 
 				elements.peopleList.append(fragment);
 			}
+
+			renderMergeBar();
 		}
 
 		async function requestJson(url, options) {
@@ -783,16 +941,22 @@
 				...options,
 			});
 
-			if (!response.ok) {
-				throw new Error(`${response.status} ${response.statusText}`);
-			}
-
 			const contentType = response.headers.get('content-type') || '';
+			let payload;
 			if (contentType.includes('application/json')) {
-				return response.json();
+				payload = await response.json();
+			} else {
+				payload = await response.text();
 			}
 
-			return response.text();
+			if (!response.ok) {
+				const errorText = payload && typeof payload === 'object'
+					? payload.error || payload.message
+					: payload;
+				throw new Error(errorText || `${response.status} ${response.statusText}`);
+			}
+
+			return payload;
 		}
 
 		async function loadPeople() {
@@ -866,9 +1030,51 @@
 					method: 'POST',
 					body: JSON.stringify([uid]),
 				});
+				state.selected.delete(uid);
+				if (state.mergeTarget === uid) {
+					state.mergeTarget = '';
+				}
 				await loadPeople();
 			} catch (error) {
 				setNotice(`Could not delete person: ${error.message}`);
+			}
+		}
+
+		async function mergeSelectedPeople() {
+			const selected = selectedPeople();
+			if (selected.length < 2) {
+				return;
+			}
+
+			const target = state.mergeTarget || selected[0].uid;
+			const sources = selected.map((person) => person.uid).filter((uid) => uid !== target);
+			const targetName = displayName(selected.find((person) => person.uid === target));
+			const label = sources.length === 1 ? 'person' : 'people';
+
+			if (!window.confirm(`Merge ${sources.length} selected ${label} into ${targetName}?`)) {
+				return;
+			}
+
+			state.merging = true;
+			renderMergeBar();
+
+			try {
+				const result = await requestJson('/merge', {
+					method: 'POST',
+					body: JSON.stringify({ target, sources }),
+				});
+				if (!result.ok) {
+					throw new Error(result.error || 'merge failed');
+				}
+				state.selected.clear();
+				state.mergeTarget = '';
+				setNotice('');
+				await loadPeople();
+			} catch (error) {
+				setNotice(`Could not merge people: ${error.message}`);
+			} finally {
+				state.merging = false;
+				renderMergeBar();
 			}
 		}
 
@@ -882,6 +1088,12 @@
 			elements.searchInput.value = '';
 			renderPeople();
 		});
+		elements.mergeTarget.addEventListener('change', (event) => {
+			state.mergeTarget = event.target.value;
+			renderMergeBar();
+		});
+		elements.mergeButton.addEventListener('click', mergeSelectedPeople);
+		elements.clearSelectionButton.addEventListener('click', clearSelection);
 
 		elements.mainView.addEventListener('load', () => {
 			setFeedAvailable(true, state.mockMode ? 'Mock stream active' : 'Stream connected');

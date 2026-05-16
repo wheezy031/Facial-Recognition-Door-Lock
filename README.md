@@ -113,13 +113,13 @@ Choose one camera backend before starting the service. The default is the
 Raspberry Pi camera backend:
 
 ```bash
-DOORLOCK_CAMERA_BACKEND="auto"
+DOORLOCK_CAMERA_BACKEND="rpicam"
 ```
 
 #### Raspberry Pi Camera
 
-For the Raspberry Pi Camera Module, leave `DOORLOCK_CAMERA_BACKEND` as `auto`.
-The app tries Picamera2 first, then falls back to `rpicam-vid`/`libcamera-vid`.
+For the Raspberry Pi Camera Module, leave `DOORLOCK_CAMERA_BACKEND` as `rpicam`.
+The app uses `rpicam-vid`/`libcamera-vid` by default.
 
 When running the app from a conda Python environment, the command-line camera
 backend is usually the most reliable option, because it avoids importing
@@ -129,7 +129,7 @@ Picamera2 into the conda Python process:
 sudo apt-get install -y --no-install-recommends rpicam-apps
 ```
 
-To force the Pi camera command-line backend:
+To explicitly set the Pi camera command-line backend:
 
 ```bash
 sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d' /etc/default/doorlock
@@ -195,7 +195,7 @@ sudo /etc/init.d/doorlock restart
 Switch back to the real camera backend after attaching the camera:
 
 ```bash
-sudo sed -i 's/^DOORLOCK_CAMERA_BACKEND=.*/DOORLOCK_CAMERA_BACKEND="auto"/' /etc/default/doorlock
+sudo sed -i 's/^DOORLOCK_CAMERA_BACKEND=.*/DOORLOCK_CAMERA_BACKEND="rpicam"/' /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 

@@ -454,7 +454,7 @@ def add_shared_capture_args(parser):
 	parser.add_argument('--interval', type=float, default=0.25)
 	parser.add_argument('--dataset-dir', type=Path, default=DEFAULT_DATASET_DIR)
 	parser.add_argument('--embedding-model', type=Path)
-	parser.add_argument('--camera', choices=('auto', 'picamera2', 'rpicam', 'opencv'), default='auto')
+	parser.add_argument('--camera', choices=('auto', 'picamera2', 'rpicam', 'opencv'), default='rpicam')
 	parser.add_argument('--opencv-index', type=int, default=0)
 	parser.add_argument('--width', type=int, default=1280)
 	parser.add_argument('--height', type=int, default=720)
