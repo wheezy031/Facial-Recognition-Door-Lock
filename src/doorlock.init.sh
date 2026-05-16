@@ -16,6 +16,13 @@ DOORLOCK_APP_DIR="$DOORLOCK_REPO_DIR/src"
 DOORLOCK_PYTHON_BIN="$DOORLOCK_REPO_DIR/.venv/bin/python"
 DOORLOCK_PORT="8080"
 DOORLOCK_CAMERA_BACKEND="auto"
+DOORLOCK_CAMERA_INDEX="0"
+DOORLOCK_CAMERA_DEVICE=""
+DOORLOCK_CAMERA_WIDTH="1280"
+DOORLOCK_CAMERA_HEIGHT="720"
+DOORLOCK_CAMERA_FOURCC="MJPG"
+DOORLOCK_PROCESSING_SCALE="0.5"
+DOORLOCK_STREAM_SCALE="1.0"
 PIDFILE="/var/run/doorlock.pid"
 LOGFILE="/var/log/doorlock.log"
 
@@ -45,7 +52,10 @@ case "$1" in
 		fi
 
 		cd "$DOORLOCK_APP_DIR" || exit 1
-		export DOORLOCK_REPO_DIR DOORLOCK_APP_DIR DOORLOCK_PYTHON_BIN DOORLOCK_PORT DOORLOCK_CAMERA_BACKEND
+		export DOORLOCK_REPO_DIR DOORLOCK_APP_DIR DOORLOCK_PYTHON_BIN DOORLOCK_PORT
+		export DOORLOCK_CAMERA_BACKEND DOORLOCK_CAMERA_INDEX DOORLOCK_CAMERA_DEVICE
+		export DOORLOCK_CAMERA_WIDTH DOORLOCK_CAMERA_HEIGHT DOORLOCK_CAMERA_FOURCC
+		export DOORLOCK_PROCESSING_SCALE DOORLOCK_STREAM_SCALE
 		"$DOORLOCK_PYTHON_BIN" ./doorlock.py >> "$LOGFILE" 2>&1 &
 		echo $! > "$PIDFILE"
 
@@ -65,6 +75,16 @@ case "$1" in
 			PID="$(cat "$PIDFILE")"
 			if kill -0 "$PID" 2>/dev/null; then
 				kill "$PID"
+				for _ in 1 2 3 4 5 6 7 8 9 10; do
+					if ! kill -0 "$PID" 2>/dev/null; then
+						break
+					fi
+					sleep 1
+				done
+				if kill -0 "$PID" 2>/dev/null; then
+					echo "Doorlock did not stop cleanly, killing $PID"
+					kill -9 "$PID"
+				fi
 			fi
 			rm -f "$PIDFILE"
 		else

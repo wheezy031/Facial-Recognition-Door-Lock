@@ -160,10 +160,15 @@ class Identifier:
 		self.recognizer.close()
 
 	async def stream(self, response):
-		while True:
-			r = b''.join([b'--frame\r\nContent-Type:image/jpeg\r\n\r\n', self.view, b'\r\n'])
-			await response.write(r)
-			await asyncio.sleep(0.1)
+		try:
+			while not self.exit:
+				r = b''.join([b'--frame\r\nContent-Type:image/jpeg\r\n\r\n', self.view, b'\r\n'])
+				await response.write(r)
+				await asyncio.sleep(0.1)
+		except asyncio.CancelledError:
+			return
+		except (ConnectionError, BrokenPipeError):
+			return
 
 	def toggleAccess(self, uid):
 		if uid not in self.encodings.keys():

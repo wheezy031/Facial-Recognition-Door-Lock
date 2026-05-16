@@ -115,6 +115,44 @@ backend is usually the most reliable option:
 sudo apt-get install -y --no-install-recommends rpicam-apps
 ```
 
+For a USB webcam, switch the camera backend to OpenCV and set the camera index:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d;/^DOORLOCK_CAMERA_INDEX=/d;/^DOORLOCK_CAMERA_DEVICE=/d;/^DOORLOCK_CAMERA_FOURCC=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_BACKEND="opencv"\nDOORLOCK_CAMERA_INDEX="0"\nDOORLOCK_CAMERA_FOURCC="MJPG"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+If index `0` is not the USB camera, test available indexes:
+
+```bash
+/home/declan/conda-envs/fr-doorlock-py312/bin/python - <<'PY'
+import cv2
+
+for index in range(5):
+    cap = cv2.VideoCapture(index)
+    ok, frame = cap.read()
+    print(index, 'opened', cap.isOpened(), 'frame', ok, None if frame is None else frame.shape)
+    cap.release()
+PY
+```
+
+Some USB cameras expose multiple `/dev/video*` nodes. To target a specific one
+directly:
+
+```bash
+printf 'DOORLOCK_CAMERA_BACKEND="opencv"\nDOORLOCK_CAMERA_DEVICE="/dev/video0"\nDOORLOCK_CAMERA_FOURCC="MJPG"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+The recognition loop can process a smaller frame while the web UI streams the
+full camera frame. If the live feed looks jagged, keep the stream at full scale:
+
+```bash
+printf 'DOORLOCK_PROCESSING_SCALE="0.5"\nDOORLOCK_STREAM_SCALE="1.0"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
 To run the web interface without a camera attached, switch to the mock camera
 backend:
 
