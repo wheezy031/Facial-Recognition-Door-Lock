@@ -1,5 +1,6 @@
 import asyncio
 import os
+import select
 import shutil
 import subprocess
 import threading
@@ -33,6 +34,16 @@ def truthy(value):
 def env_float(name, default):
 	try:
 		value = float(os.environ.get(name, default))
+	except ValueError:
+		return default
+	if value <= 0:
+		return default
+	return value
+
+
+def env_int(name, default):
+	try:
+		value = int(os.environ.get(name, default))
 	except ValueError:
 		return default
 	if value <= 0:
@@ -227,12 +238,15 @@ class Picamera2Camera:
 	def __init__(self, size=(1280, 720)):
 		from picamera2 import Picamera2
 
+		fps = env_int('DOORLOCK_CAMERA_FPS', 10)
 		self.picam = Picamera2()
 		config = self.picam.create_video_configuration(
 			main={'size': size, 'format': 'RGB888'}
 		)
 		self.picam.configure(config)
+		self.picam.set_controls({'FrameRate': fps})
 		self.picam.start()
+		print('opened Picamera2 at {}x{} {} fps'.format(size[0], size[1], fps))
 
 	def capture_array(self):
 		frame_rgb = self.picam.capture_array()
@@ -249,6 +263,7 @@ class RpicamVidCamera:
 			raise RuntimeError('No camera backend found. Install rpicam-apps or python3-picamera2.')
 
 		width, height = size
+		fps = env_int('DOORLOCK_CAMERA_FPS', 10)
 		self.process = subprocess.Popen(
 			[
 				command,
@@ -256,6 +271,7 @@ class RpicamVidCamera:
 				'--inline',
 				'--nopreview',
 				'--timeout', '0',
+				'--framerate', str(fps),
 				'--width', str(width),
 				'--height', str(height),
 				'-o', '-',
@@ -264,25 +280,66 @@ class RpicamVidCamera:
 			stderr=subprocess.DEVNULL,
 		)
 		self.buffer = b''
+		self.stdout_fd = self.process.stdout.fileno()
+		self.read_timeout = env_float('DOORLOCK_CAMERA_READ_TIMEOUT_SECONDS', 2.0)
+		self.max_buffer_bytes = max(65536, env_int('DOORLOCK_CAMERA_MAX_BUFFER_BYTES', 4 * 1024 * 1024))
+		os.set_blocking(self.stdout_fd, False)
+		print('opened rpicam-vid at {}x{} {} fps'.format(width, height, fps))
 
-	def capture_array(self):
-		while True:
-			chunk = self.process.stdout.read(65536)
+	def _read_available(self, timeout):
+		ready, _, _ = select.select([self.stdout_fd], [], [], timeout)
+		if not ready:
+			if self.process.poll() is not None:
+				raise RuntimeError('camera process stopped')
+			raise RuntimeError('camera frame timed out')
+
+		while ready:
+			try:
+				chunk = os.read(self.stdout_fd, 65536)
+			except BlockingIOError:
+				break
 			if not chunk:
 				raise RuntimeError('camera process stopped')
 
 			self.buffer += chunk
-			start = self.buffer.find(b'\xff\xd8')
-			end = self.buffer.find(b'\xff\xd9', start + 2)
+			if len(self.buffer) > self.max_buffer_bytes:
+				self.buffer = self.buffer[-self.max_buffer_bytes:]
 
-			if start == -1 or end == -1:
+			ready, _, _ = select.select([self.stdout_fd], [], [], 0)
+
+	def _pop_latest_jpeg(self):
+		latest = None
+		while True:
+			start = self.buffer.find(b'\xff\xd8')
+			if start == -1:
+				self.buffer = self.buffer[-1:]
+				return latest
+
+			end = self.buffer.find(b'\xff\xd9', start + 2)
+			if end == -1:
+				if start > 0:
+					self.buffer = self.buffer[start:]
+				return latest
+
+			latest = self.buffer[start:end + 2]
+			self.buffer = self.buffer[end + 2:]
+
+	def capture_array(self):
+		deadline = time.monotonic() + self.read_timeout
+		while True:
+			timeout = max(0.01, deadline - time.monotonic())
+			self._read_available(timeout)
+			jpeg = self._pop_latest_jpeg()
+			if jpeg is None:
+				if time.monotonic() >= deadline:
+					raise RuntimeError('camera frame timed out')
 				continue
 
-			jpeg = self.buffer[start:end + 2]
-			self.buffer = self.buffer[end + 2:]
 			frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
 			if frame is not None:
 				return frame
+			if time.monotonic() >= deadline:
+				raise RuntimeError('camera frame decode failed')
 
 	def close(self):
 		if self.process.poll() is None:
@@ -306,21 +363,25 @@ class OpenCVCamera:
 
 		width, height = size
 		fourcc = os.environ.get('DOORLOCK_CAMERA_FOURCC', 'MJPG')
+		fps = env_int('DOORLOCK_CAMERA_FPS', 10)
 		if fourcc:
 			self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc[:4]))
 		self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
 		self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+		self.capture.set(cv2.CAP_PROP_FPS, fps)
 		self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 		actual_width = int(self.capture.get(cv2.CAP_PROP_FRAME_WIDTH))
 		actual_height = int(self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+		actual_fps = self.capture.get(cv2.CAP_PROP_FPS)
 		actual_fourcc = int(self.capture.get(cv2.CAP_PROP_FOURCC))
 		actual_fourcc = ''.join(chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4))
 		print(
-			'opened OpenCV camera source {} at {}x{} fourcc {}'.format(
+			'opened OpenCV camera source {} at {}x{} {:.1f} fps fourcc {}'.format(
 				source,
 				actual_width,
 				actual_height,
+				actual_fps,
 				actual_fourcc,
 			)
 		)

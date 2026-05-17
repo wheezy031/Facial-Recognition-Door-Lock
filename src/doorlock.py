@@ -69,6 +69,7 @@ async def status(request):
         'cameraBackend': backend,
         'cameraDevice': os.environ.get('DOORLOCK_CAMERA_DEVICE', ''),
         'cameraFourcc': os.environ.get('DOORLOCK_CAMERA_FOURCC', 'MJPG'),
+        'cameraFps': int(os.environ.get('DOORLOCK_CAMERA_FPS', '10')),
         'cameraIndex': int(os.environ.get('DOORLOCK_CAMERA_INDEX', '0')),
         'mockMode': backend in ('mock', 'none', 'disabled'),
         'port': int(os.environ.get('DOORLOCK_PORT', '80')),

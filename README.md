@@ -134,6 +134,7 @@ Raspberry Pi camera backend:
 
 ```bash
 DOORLOCK_CAMERA_BACKEND="rpicam"
+DOORLOCK_CAMERA_FPS="10"
 ```
 
 #### Raspberry Pi Camera
@@ -154,6 +155,15 @@ To explicitly set the Pi camera command-line backend:
 ```bash
 sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d' /etc/default/doorlock
 printf 'DOORLOCK_CAMERA_BACKEND="rpicam"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+If the Pi camera stream is delayed, lower the camera frame rate so the
+recognition loop does not build a backlog of old frames:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 
@@ -199,6 +209,15 @@ full camera frame. If the live feed looks jagged, keep the stream at full scale:
 
 ```bash
 printf 'DOORLOCK_PROCESSING_SCALE="0.5"\nDOORLOCK_STREAM_SCALE="1.0"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+For lower latency on slower Pi hardware, reduce the captured resolution as
+well:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_WIDTH=/d;/^DOORLOCK_CAMERA_HEIGHT=/d;/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_WIDTH="640"\nDOORLOCK_CAMERA_HEIGHT="480"\nDOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 
