@@ -13,6 +13,7 @@ import numpy as np
 relay = None
 relay_error_reported = False
 unlock_timer = None
+last_access_granted = {}
 door_state_lock = threading.RLock()
 door_state = {
 	'state': 'locked',
@@ -195,6 +196,16 @@ def lockDoor():
 
 
 def accessGranted(name=None):
+	key = name or 'unknown'
+	now = time.time()
+	cooldown = env_float('DOORLOCK_ACCESS_COOLDOWN_SECONDS', 10.0)
+	with door_state_lock:
+		if door_state['state'] == 'unlocked':
+			return
+		if now - last_access_granted.get(key, 0) < cooldown:
+			return
+	last_access_granted[key] = now
+
 	print('Access Granted')
 	if name:
 		print('Hello', name)
