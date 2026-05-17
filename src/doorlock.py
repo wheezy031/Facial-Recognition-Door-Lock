@@ -11,6 +11,7 @@ it will
 
 import asyncio
 import os
+import threading
 from pathlib import Path
 
 from sanic import Sanic
@@ -65,16 +66,20 @@ async def vue_runtime(request):
 @app.route('/status')
 async def status(request):
     backend = camera_backend()
+    video_thread = getattr(request.app.ctx, 'video_thread', None)
     return sanic_response.json({
         'cameraBackend': backend,
         'cameraDevice': os.environ.get('DOORLOCK_CAMERA_DEVICE', ''),
         'cameraFourcc': os.environ.get('DOORLOCK_CAMERA_FOURCC', 'MJPG'),
         'cameraFps': int(os.environ.get('DOORLOCK_CAMERA_FPS', '10')),
         'cameraIndex': int(os.environ.get('DOORLOCK_CAMERA_INDEX', '0')),
+        'cameraThreadAlive': video_thread is not None and video_thread.is_alive(),
         'mockMode': backend in ('mock', 'none', 'disabled'),
         'port': int(os.environ.get('DOORLOCK_PORT', '80')),
         'processingScale': float(os.environ.get('DOORLOCK_PROCESSING_SCALE', '0.5')),
+        'recognitionFps': float(os.environ.get('DOORLOCK_RECOGNITION_FPS', '3')),
         'streamScale': float(os.environ.get('DOORLOCK_STREAM_SCALE', '1.0')),
+        'streamFps': float(os.environ.get('DOORLOCK_STREAM_FPS', '10')),
         'door': doorState(),
     })
 
@@ -222,20 +227,26 @@ async def server_prepare(app):
 
 @app.listener('after_server_start')
 async def server_start(app):
-    app.ctx.video_task = asyncio.create_task(videoProcessing(app.ctx.identifier, False))
+    app.ctx.video_thread = threading.Thread(
+        target=videoProcessing,
+        args=(app.ctx.identifier, False),
+        name='doorlock-video',
+        daemon=True,
+    )
+    app.ctx.video_thread.start()
 
 
 @app.listener('before_server_stop')
 async def server_stop(app):
     if hasattr(app.ctx, 'identifier'):
         app.ctx.identifier.quit()
-    task = getattr(app.ctx, 'video_task', None)
-    if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    thread = getattr(app.ctx, 'video_thread', None)
+    if thread is not None and thread.is_alive():
+        await asyncio.to_thread(thread.join, 10)
+        if thread.is_alive():
+            print('video worker did not stop cleanly before timeout')
+    if hasattr(app.ctx, 'identifier') and (thread is None or not thread.is_alive()):
+        app.ctx.identifier.close()
     close_relay()
 
 

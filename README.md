@@ -135,6 +135,8 @@ Raspberry Pi camera backend:
 ```bash
 DOORLOCK_CAMERA_BACKEND="rpicam"
 DOORLOCK_CAMERA_FPS="10"
+DOORLOCK_RECOGNITION_FPS="3"
+DOORLOCK_STREAM_FPS="10"
 ```
 
 #### Raspberry Pi Camera
@@ -162,10 +164,15 @@ If the Pi camera stream is delayed, lower the camera frame rate so the
 recognition loop does not build a backlog of old frames:
 
 ```bash
-sudo sed -i '/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
-printf 'DOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
+sudo sed -i '/^DOORLOCK_CAMERA_FPS=/d;/^DOORLOCK_RECOGNITION_FPS=/d;/^DOORLOCK_STREAM_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_FPS="5"\nDOORLOCK_RECOGNITION_FPS="2"\nDOORLOCK_STREAM_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
+
+The web server runs separately from the camera/recognition worker thread, so
+API calls and the UI remain responsive while frames are being processed.
+`DOORLOCK_RECOGNITION_FPS` controls how often face detection and embedding runs;
+`DOORLOCK_STREAM_FPS` controls how often the browser receives the latest JPEG.
 
 #### USB Webcam
 
@@ -216,8 +223,8 @@ For lower latency on slower Pi hardware, reduce the captured resolution as
 well:
 
 ```bash
-sudo sed -i '/^DOORLOCK_CAMERA_WIDTH=/d;/^DOORLOCK_CAMERA_HEIGHT=/d;/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
-printf 'DOORLOCK_CAMERA_WIDTH="640"\nDOORLOCK_CAMERA_HEIGHT="480"\nDOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
+sudo sed -i '/^DOORLOCK_CAMERA_WIDTH=/d;/^DOORLOCK_CAMERA_HEIGHT=/d;/^DOORLOCK_CAMERA_FPS=/d;/^DOORLOCK_RECOGNITION_FPS=/d;/^DOORLOCK_STREAM_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_WIDTH="640"\nDOORLOCK_CAMERA_HEIGHT="480"\nDOORLOCK_CAMERA_FPS="5"\nDOORLOCK_RECOGNITION_FPS="2"\nDOORLOCK_STREAM_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 

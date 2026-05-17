@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import string
+import threading
 import time
 
 import cv2
@@ -86,6 +87,7 @@ def _env_int(name, default):
 
 class Identifier:
 	def __init__(self):
+		self.lock = threading.RLock()
 		self.view = no_camera_frame()
 		self.encodings = {}
 		self.embeddings = {}
@@ -222,13 +224,16 @@ class Identifier:
 	def setView(self, view):
 		if hasattr(view, 'tobytes'):
 			view = view.tobytes()
-		self.view = view
+		with self.lock:
+			self.view = view
 
 	def setNoFeed(self, message='No camera feed'):
-		self.view = no_camera_frame(message)
+		view = no_camera_frame(message)
+		with self.lock:
+			self.view = view
 
 	def setCurrentFaces(self, faces):
-		self.latest_faces = [
+		latest_faces = [
 			{
 				'thumbnail': face.get('thumbnail'),
 				'embedding': self._normalize(face['embedding']),
@@ -237,95 +242,117 @@ class Identifier:
 			for face in faces
 			if face.get('embedding') is not None
 		]
+		with self.lock:
+			self.latest_faces = latest_faces
 
 	def quit(self):
-		self.exit = True
+		with self.lock:
+			self.exit = True
+
+	def close(self):
 		self.recognizer.close()
 
+	def shouldExit(self):
+		with self.lock:
+			return self.exit
+
+	def currentView(self):
+		with self.lock:
+			return self.view
+
 	async def stream(self, response):
+		stream_fps = max(1.0, _env_float('DOORLOCK_STREAM_FPS', 10.0))
+		stream_interval = 1.0 / stream_fps
 		try:
-			while not self.exit:
-				r = b''.join([b'--frame\r\nContent-Type:image/jpeg\r\n\r\n', self.view, b'\r\n'])
+			while not self.shouldExit():
+				r = b''.join([b'--frame\r\nContent-Type:image/jpeg\r\n\r\n', self.currentView(), b'\r\n'])
 				await response.write(r)
-				await asyncio.sleep(0.1)
+				await asyncio.sleep(stream_interval)
 		except asyncio.CancelledError:
 			return
 		except (ConnectionError, BrokenPipeError):
 			return
 
 	def toggleAccess(self, uid):
-		if uid not in self.encodings.keys():
-			return 'unknown user'
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return 'unknown user'
 
-		if uid in self.allowed:
-			self.allowed.remove(uid)
-		else:
-			self.allowed.append(uid)
+			if uid in self.allowed:
+				self.allowed.remove(uid)
+			else:
+				self.allowed.append(uid)
 
-		self.saveMeta()
+			self.saveMeta()
 
-		return 'ok'
+			return 'ok'
 
 	def hasAccess(self, uid):
-		if uid not in self.encodings.keys():
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return False
+			if uid in self.allowed:
+				return True
 			return False
-		if uid in self.allowed:
-			return True
-		return False
 
 	def displayName(self, uid):
-		return self.friendly_names.get(uid, uid)
+		with self.lock:
+			return self.friendly_names.get(uid, uid)
 
 	def sampleCount(self, uid):
-		return len(self.embeddings.get(uid, []))
+		with self.lock:
+			return len(self.embeddings.get(uid, []))
 
 	def saveMeta(self, fn=None):
-		p = Path(fn) if fn else self.people_dir / 'meta.txt'
-		with p.open('w') as f:
-			for user in self.encodings.keys():
-				allowed = user in self.allowed
-				name = self.friendly_names.get(user, '')
-				f.write('{},{},{}\n'.format(user, allowed, name))
+		with self.lock:
+			p = Path(fn) if fn else self.people_dir / 'meta.txt'
+			with p.open('w') as f:
+				for user in self.encodings.keys():
+					allowed = user in self.allowed
+					name = self.friendly_names.get(user, '')
+					f.write('{},{},{}\n'.format(user, allowed, name))
 
 	def addNew(self, thumbnail, encoding):
-		c = string.ascii_uppercase + string.ascii_lowercase + string.digits
+		with self.lock:
+			c = string.ascii_uppercase + string.ascii_lowercase + string.digits
 
-		uid = ''.join(random.choice(c) for _ in range(8))
-		while uid in self.encodings.keys():
 			uid = ''.join(random.choice(c) for _ in range(8))
+			while uid in self.encodings.keys():
+				uid = ''.join(random.choice(c) for _ in range(8))
 
-		encoding = self._normalize(encoding)
-		self.embeddings[uid] = np.expand_dims(encoding, axis=0)
-		self.encodings[uid] = encoding
-		cv2.imwrite(str(self.people_dir / '{}.jpg'.format(uid)), thumbnail)
-		self._save_user_embeddings(uid)
-		self.saveMeta()
+			encoding = self._normalize(encoding)
+			self.embeddings[uid] = np.expand_dims(encoding, axis=0)
+			self.encodings[uid] = encoding
+			cv2.imwrite(str(self.people_dir / '{}.jpg'.format(uid)), thumbnail)
+			self._save_user_embeddings(uid)
+			self.saveMeta()
 
-		return uid
+			return uid
 
 	def addEmbeddingSample(self, uid, thumbnail, encoding):
-		if uid not in self.encodings.keys():
-			return {'ok': False, 'error': 'unknown user'}
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return {'ok': False, 'error': 'unknown user'}
 
-		encoding = self._normalize(encoding)
-		samples = self.embeddings.get(uid)
-		if samples is None or len(samples) == 0:
-			samples = np.expand_dims(self.encodings[uid], axis=0)
-		self.embeddings[uid] = np.vstack([samples, encoding]).astype(np.float32)
-		self._save_user_embeddings(uid)
+			encoding = self._normalize(encoding)
+			samples = self.embeddings.get(uid)
+			if samples is None or len(samples) == 0:
+				samples = np.expand_dims(self.encodings[uid], axis=0)
+			self.embeddings[uid] = np.vstack([samples, encoding]).astype(np.float32)
+			self._save_user_embeddings(uid)
 
-		if thumbnail is not None:
-			image_path = self.people_dir / '{}.jpg'.format(uid)
-			if not image_path.exists():
-				cv2.imwrite(str(image_path), thumbnail)
+			if thumbnail is not None:
+				image_path = self.people_dir / '{}.jpg'.format(uid)
+				if not image_path.exists():
+					cv2.imwrite(str(image_path), thumbnail)
 
-		self.saveMeta()
-		return {
-			'ok': True,
-			'uid': uid,
-			'samples': self.sampleCount(uid),
-			'maxSamples': self.max_samples,
-		}
+			self.saveMeta()
+			return {
+				'ok': True,
+				'uid': uid,
+				'samples': len(self.embeddings.get(uid, [])),
+				'maxSamples': self.max_samples,
+			}
 
 	def _distance_to_uid(self, uid, encoding):
 		samples = self.embeddings.get(uid)
@@ -334,36 +361,38 @@ class Identifier:
 		return min(self.recognizer.distance(sample, encoding) for sample in samples)
 
 	def _best_current_face_for_uid(self, uid):
-		if uid not in self.encodings.keys():
-			return None, None
-		if not self.latest_faces:
-			return None, None
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return None, None
+			if not self.latest_faces:
+				return None, None
 
-		distances = [
-			(self._distance_to_uid(uid, face['embedding']), face)
-			for face in self.latest_faces
-		]
-		return min(distances, key=lambda item: item[0])
+			distances = [
+				(self._distance_to_uid(uid, face['embedding']), face)
+				for face in self.latest_faces
+			]
+			return min(distances, key=lambda item: item[0])
 
 	def captureSample(self, uid):
-		if uid not in self.encodings.keys():
-			return {'ok': False, 'error': 'unknown user'}
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return {'ok': False, 'error': 'unknown user'}
 
-		distance, face = self._best_current_face_for_uid(uid)
-		if face is None:
-			return {'ok': False, 'error': 'no face is currently visible'}
+			distance, face = self._best_current_face_for_uid(uid)
+			if face is None:
+				return {'ok': False, 'error': 'no face is currently visible'}
 
-		if distance > self.sample_threshold:
-			return {
-				'ok': False,
-				'error': 'visible face does not confidently match {}'.format(self.displayName(uid)),
-				'distance': distance,
-				'threshold': self.sample_threshold,
-			}
+			if distance > self.sample_threshold:
+				return {
+					'ok': False,
+					'error': 'visible face does not confidently match {}'.format(self.displayName(uid)),
+					'distance': distance,
+					'threshold': self.sample_threshold,
+				}
 
-		result = self.addEmbeddingSample(uid, face['thumbnail'], face['embedding'])
-		result['distance'] = distance
-		return result
+			result = self.addEmbeddingSample(uid, face['thumbnail'], face['embedding'])
+			result['distance'] = distance
+			return result
 
 	def _maybeLearn(self, uid, encoding, distance):
 		if not self.auto_learn or distance > self.auto_learn_threshold:
@@ -377,144 +406,149 @@ class Identifier:
 		self.addEmbeddingSample(uid, None, encoding)
 
 	def setName(self, uid, name):
-		if uid not in self.encodings.keys():
-			return False
-		if name:
-			self.friendly_names[uid] = name
-		else:
-			self.friendly_names.pop(uid, None)
-		self.saveMeta()
-		return True
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return False
+			if name:
+				self.friendly_names[uid] = name
+			else:
+				self.friendly_names.pop(uid, None)
+			self.saveMeta()
+			return True
 
 	def getNames(self):
-		ret = []
-		for uid in self.encodings.keys():
-			friendly = self.friendly_names.get(uid)
-			ret.append({
-				'uid': uid,
-				'friendly': friendly,
-				'name': friendly or uid,
-				'allowed': True if uid in self.allowed else False,
-				'samples': self.sampleCount(uid),
-			})
-		print(ret)
-		return ret
+		with self.lock:
+			ret = []
+			for uid in self.encodings.keys():
+				friendly = self.friendly_names.get(uid)
+				ret.append({
+					'uid': uid,
+					'friendly': friendly,
+					'name': friendly or uid,
+					'allowed': True if uid in self.allowed else False,
+					'samples': len(self.embeddings.get(uid, [])),
+				})
+			return ret
 
 	def delete(self, uid):
-		if uid not in self.encodings.keys():
-			return None
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return None
 
-		del self.encodings[uid]
-		self.embeddings.pop(uid, None)
-		if uid in self.allowed:
-			self.allowed.remove(uid)
-		self.friendly_names.pop(uid, None)
-
-		for suffix in ('.jpg', '.npy', '.embeddings.npy'):
-			p = self.people_dir / '{}{}'.format(uid, suffix)
-			if p.exists() and p.is_file():
-				p.unlink()
-
-		self.saveMeta()
-
-	def getImageLocation(self, uid):
-		if uid not in self.encodings.keys():
-			return None
-		return str(self.people_dir / '{}.jpg'.format(uid))
-
-	def merge(self, target, sources):
-		if not target or target not in self.encodings:
-			return {'ok': False, 'error': 'unknown merge target'}
-
-		unique_sources = []
-		for uid in sources:
-			if uid == target or uid in unique_sources:
-				continue
-			unique_sources.append(uid)
-		sources = unique_sources
-
-		if not sources:
-			return {'ok': False, 'error': 'choose at least one source person'}
-
-		missing = [uid for uid in sources if uid not in self.encodings]
-		if missing:
-			return {'ok': False, 'error': 'unknown source person: {}'.format(', '.join(missing))}
-
-		merged_ids = [target] + sources
-		merged_samples = []
-		for uid in merged_ids:
-			samples = self.embeddings.get(uid)
-			if samples is None or len(samples) == 0:
-				samples = np.expand_dims(self.encodings[uid], axis=0)
-			merged_samples.append(samples)
-		self.embeddings[target] = self._limit_samples(self._normalize_samples(np.vstack(merged_samples)))
-		self._save_user_embeddings(target)
-
-		if target not in self.friendly_names:
-			for uid in sources:
-				if uid in self.friendly_names:
-					self.friendly_names[target] = self.friendly_names[uid]
-					break
-
-		any_allowed = any(uid in self.allowed for uid in merged_ids)
-		for uid in sources:
+			del self.encodings[uid]
+			self.embeddings.pop(uid, None)
 			if uid in self.allowed:
 				self.allowed.remove(uid)
 			self.friendly_names.pop(uid, None)
 
-		if any_allowed and target not in self.allowed:
-			self.allowed.append(target)
-		if not any_allowed and target in self.allowed:
-			self.allowed.remove(target)
-
-		target_image = self.people_dir / '{}.jpg'.format(target)
-		if not target_image.exists():
-			for uid in sources:
-				source_image = self.people_dir / '{}.jpg'.format(uid)
-				if source_image.exists():
-					shutil.copyfile(str(source_image), str(target_image))
-					break
-
-		for uid in sources:
-			del self.encodings[uid]
-			self.embeddings.pop(uid, None)
 			for suffix in ('.jpg', '.npy', '.embeddings.npy'):
-				path = self.people_dir / '{}{}'.format(uid, suffix)
-				if path.exists() and path.is_file():
-					path.unlink()
+				p = self.people_dir / '{}{}'.format(uid, suffix)
+				if p.exists() and p.is_file():
+					p.unlink()
 
-		self.saveMeta()
-		return {
-			'ok': True,
-			'target': target,
-			'merged': sources,
-			'allowed': target in self.allowed,
-			'name': self.displayName(target),
-			'samples': self.sampleCount(target),
-		}
+			self.saveMeta()
+
+	def getImageLocation(self, uid):
+		with self.lock:
+			if uid not in self.encodings.keys():
+				return None
+			return str(self.people_dir / '{}.jpg'.format(uid))
+
+	def merge(self, target, sources):
+		with self.lock:
+			if not target or target not in self.encodings:
+				return {'ok': False, 'error': 'unknown merge target'}
+
+			unique_sources = []
+			for uid in sources:
+				if uid == target or uid in unique_sources:
+					continue
+				unique_sources.append(uid)
+			sources = unique_sources
+
+			if not sources:
+				return {'ok': False, 'error': 'choose at least one source person'}
+
+			missing = [uid for uid in sources if uid not in self.encodings]
+			if missing:
+				return {'ok': False, 'error': 'unknown source person: {}'.format(', '.join(missing))}
+
+			merged_ids = [target] + sources
+			merged_samples = []
+			for uid in merged_ids:
+				samples = self.embeddings.get(uid)
+				if samples is None or len(samples) == 0:
+					samples = np.expand_dims(self.encodings[uid], axis=0)
+				merged_samples.append(samples)
+			self.embeddings[target] = self._limit_samples(self._normalize_samples(np.vstack(merged_samples)))
+			self._save_user_embeddings(target)
+
+			if target not in self.friendly_names:
+				for uid in sources:
+					if uid in self.friendly_names:
+						self.friendly_names[target] = self.friendly_names[uid]
+						break
+
+			any_allowed = any(uid in self.allowed for uid in merged_ids)
+			for uid in sources:
+				if uid in self.allowed:
+					self.allowed.remove(uid)
+				self.friendly_names.pop(uid, None)
+
+			if any_allowed and target not in self.allowed:
+				self.allowed.append(target)
+			if not any_allowed and target in self.allowed:
+				self.allowed.remove(target)
+
+			target_image = self.people_dir / '{}.jpg'.format(target)
+			if not target_image.exists():
+				for uid in sources:
+					source_image = self.people_dir / '{}.jpg'.format(uid)
+					if source_image.exists():
+						shutil.copyfile(str(source_image), str(target_image))
+						break
+
+			for uid in sources:
+				del self.encodings[uid]
+				self.embeddings.pop(uid, None)
+				for suffix in ('.jpg', '.npy', '.embeddings.npy'):
+					path = self.people_dir / '{}{}'.format(uid, suffix)
+					if path.exists() and path.is_file():
+						path.unlink()
+
+			self.saveMeta()
+			return {
+				'ok': True,
+				'target': target,
+				'merged': sources,
+				'allowed': target in self.allowed,
+				'name': self.friendly_names.get(target, target),
+				'samples': len(self.embeddings.get(target, [])),
+			}
 
 	def getIDFromEncoding(self, encoding, difference=None):
-		if not self.encodings:
-			print('no known users loaded')
-			return None
+		with self.lock:
+			if not self.encodings:
+				print('no known users loaded')
+				return None
 
-		if difference is None:
-			difference = self.recognizer.threshold
+			if difference is None:
+				difference = self.recognizer.threshold
 
-		encoding = self._normalize(encoding)
-		uids = list(self.encodings.keys())
-		distances = [self._distance_to_uid(uid, encoding) for uid in uids]
+			encoding = self._normalize(encoding)
+			uids = list(self.encodings.keys())
+			distances = [self._distance_to_uid(uid, encoding) for uid in uids]
 
-		if not any([d <= difference for d in distances]):
-			print('no user found')
-			return None
+			if not any([d <= difference for d in distances]):
+				print('no user found')
+				return None
 
-		most_similar = int(np.argmin(distances))
-		uid = uids[most_similar]
-		distance = distances[most_similar]
+			most_similar = int(np.argmin(distances))
+			uid = uids[most_similar]
+			distance = distances[most_similar]
 
-		print(uid, ' user, with similarity {:.1%}'.format(1 - distance))
+			print(uid, ' user, with similarity {:.1%}'.format(1 - distance))
 
-		self._maybeLearn(uid, encoding, distance)
+			self._maybeLearn(uid, encoding, distance)
 
-		return uid
+			return uid
