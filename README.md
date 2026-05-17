@@ -107,6 +107,26 @@ The file should be about 5.2 MB. Keep it named `face_embedder.tflite`, or set
 Do not use the `face_detection_*.tflite` files here; MediaPipe already handles
 face detection, and this project needs an embedding model for identity matching.
 
+### Identity Samples
+
+Each person can store multiple face embeddings. Existing `src/people/<uid>.npy`
+files are still supported, and the app will create
+`src/people/<uid>.embeddings.npy` when identities are loaded or updated.
+
+Use the web UI `Add sample` button while the person is visible to capture another
+embedding for that identity. Merging people keeps samples from the merged
+identities instead of collapsing everything into one vector.
+
+Useful tuning values in `/etc/default/doorlock`:
+
+```bash
+DOORLOCK_MAX_EMBEDDINGS_PER_PERSON="20"
+DOORLOCK_SAMPLE_THRESHOLD="0.60"
+DOORLOCK_AUTO_LEARN="1"
+DOORLOCK_AUTO_LEARN_INTERVAL_SECONDS="20"
+DOORLOCK_ACCESS_COOLDOWN_SECONDS="10"
+```
+
 ### Camera Backend
 
 Choose one camera backend before starting the service. The default is the
@@ -114,6 +134,7 @@ Raspberry Pi camera backend:
 
 ```bash
 DOORLOCK_CAMERA_BACKEND="rpicam"
+DOORLOCK_CAMERA_FPS="10"
 ```
 
 #### Raspberry Pi Camera
@@ -134,6 +155,15 @@ To explicitly set the Pi camera command-line backend:
 ```bash
 sudo sed -i '/^DOORLOCK_CAMERA_BACKEND=/d' /etc/default/doorlock
 printf 'DOORLOCK_CAMERA_BACKEND="rpicam"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+If the Pi camera stream is delayed, lower the camera frame rate so the
+recognition loop does not build a backlog of old frames:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 
@@ -179,6 +209,15 @@ full camera frame. If the live feed looks jagged, keep the stream at full scale:
 
 ```bash
 printf 'DOORLOCK_PROCESSING_SCALE="0.5"\nDOORLOCK_STREAM_SCALE="1.0"\n' | sudo tee -a /etc/default/doorlock
+sudo /etc/init.d/doorlock restart
+```
+
+For lower latency on slower Pi hardware, reduce the captured resolution as
+well:
+
+```bash
+sudo sed -i '/^DOORLOCK_CAMERA_WIDTH=/d;/^DOORLOCK_CAMERA_HEIGHT=/d;/^DOORLOCK_CAMERA_FPS=/d' /etc/default/doorlock
+printf 'DOORLOCK_CAMERA_WIDTH="640"\nDOORLOCK_CAMERA_HEIGHT="480"\nDOORLOCK_CAMERA_FPS="5"\n' | sudo tee -a /etc/default/doorlock
 sudo /etc/init.d/doorlock restart
 ```
 

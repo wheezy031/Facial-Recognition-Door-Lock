@@ -15,7 +15,7 @@ from pathlib import Path
 
 from sanic import Sanic
 import sanic.response as sanic_response
-from functions import close_relay, videoProcessing
+from functions import close_relay, doorState, lockDoor, unlockDoor, videoProcessing
 from identifier import Identifier
 
 APP_DIR = Path(__file__).resolve().parent
@@ -40,9 +40,26 @@ def stream_response(streaming_fn, content_type):
     return sanic_response.ResponseStream(streaming_fn, content_type=content_type)
 
 
+def unlock_duration(value):
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise ValueError('duration must be a number')
+    if seconds <= 0 or seconds > 60:
+        raise ValueError('duration must be between 0 and 60 seconds')
+    return seconds
+
+
 @app.route('/')
 async def index(request):
     return await sanic_response.file(str(APP_DIR / 'index' / 'index.html'))
+
+
+@app.route('/vue.global.prod.js')
+async def vue_runtime(request):
+    return await sanic_response.file(str(APP_DIR / 'index' / 'vue.global.prod.js'))
 
 
 @app.route('/status')
@@ -52,11 +69,13 @@ async def status(request):
         'cameraBackend': backend,
         'cameraDevice': os.environ.get('DOORLOCK_CAMERA_DEVICE', ''),
         'cameraFourcc': os.environ.get('DOORLOCK_CAMERA_FOURCC', 'MJPG'),
+        'cameraFps': int(os.environ.get('DOORLOCK_CAMERA_FPS', '10')),
         'cameraIndex': int(os.environ.get('DOORLOCK_CAMERA_INDEX', '0')),
         'mockMode': backend in ('mock', 'none', 'disabled'),
         'port': int(os.environ.get('DOORLOCK_PORT', '80')),
         'processingScale': float(os.environ.get('DOORLOCK_PROCESSING_SCALE', '0.5')),
         'streamScale': float(os.environ.get('DOORLOCK_STREAM_SCALE', '1.0')),
+        'door': doorState(),
     })
 
 
@@ -68,6 +87,30 @@ async def getImage(request, uid):
         return sanic_response.text('not valid')
 
     return await sanic_response.file(img_loc)
+
+
+# manual door control
+@app.route('/door', methods=['POST'])
+async def door(request):
+    data = request.json
+    if data is None or type(data) is not dict:
+        return sanic_response.json({'ok': False, 'error': 'wrong data'}, status=400)
+
+    action = str(data.get('action', '')).strip().lower()
+
+    try:
+        if action == 'unlock':
+            state = unlockDoor(unlock_duration(data.get('duration')))
+            return sanic_response.json({'ok': True, 'action': 'unlock', 'door': state})
+        if action == 'lock':
+            state = lockDoor()
+            return sanic_response.json({'ok': True, 'action': 'lock', 'door': state})
+    except ValueError as e:
+        return sanic_response.json({'ok': False, 'error': str(e)}, status=400)
+    except Exception as e:
+        return sanic_response.json({'ok': False, 'error': str(e)}, status=500)
+
+    return sanic_response.json({'ok': False, 'error': 'action must be lock or unlock'}, status=400)
 
 
 # manage allowed people
@@ -127,6 +170,21 @@ async def merge(request):
         return sanic_response.json({'ok': False, 'error': 'sources must contain person ids'}, status=400)
 
     result = request.app.ctx.identifier.merge(target, sources)
+    return sanic_response.json(result, status=200 if result.get('ok') else 400)
+
+
+# capture another live embedding sample for an existing person
+@app.route('/sample', methods=['POST'])
+async def sample(request):
+    data = request.json
+    if data is None or type(data) is not dict:
+        return sanic_response.json({'ok': False, 'error': 'wrong data'}, status=400)
+
+    uid = data.get('uid')
+    if not isinstance(uid, str):
+        return sanic_response.json({'ok': False, 'error': 'uid must be a person id'}, status=400)
+
+    result = request.app.ctx.identifier.captureSample(uid)
     return sanic_response.json(result, status=200 if result.get('ok') else 400)
 
 

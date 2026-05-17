@@ -52,6 +52,10 @@
 			opacity: 0.62;
 		}
 
+		[v-cloak] {
+			display: none;
+		}
+
 		.shell {
 			width: min(1440px, 100%);
 			margin: 0 auto;
@@ -134,6 +138,14 @@
 			background: var(--denied);
 		}
 
+		.door-status.is-locked .status-dot {
+			background: var(--accent);
+		}
+
+		.door-status.is-unlocked .status-dot {
+			background: var(--allowed);
+		}
+
 		.btn {
 			display: inline-flex;
 			align-items: center;
@@ -164,6 +176,17 @@
 			background: var(--accent-strong);
 		}
 
+		.btn-success {
+			border-color: var(--allowed);
+			background: var(--allowed);
+			color: #ffffff;
+		}
+
+		.btn-success:hover {
+			border-color: #0f5b3f;
+			background: #0f5b3f;
+		}
+
 		.btn-danger {
 			border-color: #e2b7b2;
 			color: var(--denied);
@@ -171,6 +194,16 @@
 
 		.btn-danger:hover {
 			background: var(--denied-bg);
+		}
+
+		.manual-controls {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.door-action {
+			min-width: 112px;
 		}
 
 		.grid {
@@ -435,8 +468,9 @@
 		.person-actions {
 			display: flex;
 			align-items: center;
-			justify-content: space-between;
+			justify-content: flex-start;
 			gap: 12px;
+			flex-wrap: wrap;
 			margin-top: 12px;
 		}
 
@@ -544,7 +578,7 @@
 		}
 
 		.modal {
-			width: min(480px, 100%);
+			width: min(560px, 100%);
 			overflow: hidden;
 			border: 1px solid var(--line);
 			border-radius: 8px;
@@ -610,7 +644,7 @@
 		}
 
 		.summary-person,
-		.summary-list li {
+		.summary-item {
 			padding: 9px 10px;
 			border: 1px solid var(--line);
 			border-radius: 7px;
@@ -622,11 +656,52 @@
 		.summary-list {
 			display: grid;
 			gap: 6px;
-			max-height: 160px;
+			max-height: 240px;
 			margin: 0;
 			padding: 0;
 			overflow: auto;
 			list-style: none;
+		}
+
+		.source-choice {
+			display: grid;
+			grid-template-columns: auto 44px minmax(0, 1fr);
+			gap: 10px;
+			align-items: center;
+			cursor: pointer;
+		}
+
+		.source-choice input {
+			width: 17px;
+			height: 17px;
+			accent-color: var(--accent);
+		}
+
+		.source-choice-image {
+			width: 44px;
+			height: 44px;
+			border: 1px solid var(--line);
+			border-radius: 7px;
+			background: var(--panel-subtle);
+			object-fit: cover;
+		}
+
+		.source-choice-main {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.source-choice-name {
+			overflow-wrap: anywhere;
+		}
+
+		.source-choice-id {
+			color: var(--muted);
+			font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+			font-size: 12px;
+			font-weight: 500;
+			overflow-wrap: anywhere;
 		}
 
 		.modal-error {
@@ -694,6 +769,14 @@
 				justify-content: flex-start;
 			}
 
+			.manual-controls {
+				width: 100%;
+			}
+
+			.manual-controls .btn {
+				flex: 1 1 0;
+			}
+
 			.grid {
 				grid-template-columns: 1fr;
 			}
@@ -755,688 +838,698 @@
 	</style>
 </head>
 <body>
-	<div class="shell">
-		<header class="topbar">
-			<div class="brand">
-				<div class="brand-mark">DL</div>
-				<div>
-					<h1>Door Lock</h1>
-					<p class="subhead">Camera access control</p>
+	<div id="app" v-cloak>
+		<div class="shell">
+			<header class="topbar">
+				<div class="brand">
+					<div class="brand-mark">DL</div>
+					<div>
+						<h1>Door Lock</h1>
+						<p class="subhead">Camera access control</p>
+					</div>
 				</div>
-			</div>
-			<div class="toolbar">
-				<div id="serviceStatus" class="status-pill" aria-live="polite">
-					<span class="status-dot"></span>
-					<span id="serviceStatusText">Checking service</span>
+				<div class="toolbar">
+					<div class="status-pill" :class="serviceStatusClass" aria-live="polite">
+						<span class="status-dot"></span>
+						<span>{{ serviceText }}</span>
+					</div>
+					<div class="status-pill door-status" :class="doorStatusClass" aria-live="polite">
+						<span class="status-dot"></span>
+						<span>{{ doorStatusText }}</span>
+					</div>
+					<div class="manual-controls" aria-label="Manual door controls">
+						<button
+							class="btn door-action"
+							:class="doorButtonClass"
+							type="button"
+							:disabled="doorBusy || (doorState && doorState.state === 'error')"
+							@click="manualDoorAction(doorAction)"
+						>{{ doorButtonText }}</button>
+					</div>
+					<button class="btn btn-primary" type="button" :disabled="loading" @click="loadPeople()">
+						{{ loading ? 'Refreshing...' : 'Refresh' }}
+					</button>
 				</div>
-				<button id="refreshButton" class="btn btn-primary" type="button">Refresh</button>
-			</div>
-		</header>
+			</header>
 
-		<div id="notice" class="notice" role="alert"></div>
-		<div id="mockNotice" class="mode-notice" hidden>
-			<span class="mode-dot"></span>
-			<span class="mode-text">Mock camera mode is active. The live view is simulated and access decisions are not using physical camera input.</span>
+			<div class="notice" :class="{ 'is-visible': notice }" role="alert">{{ notice }}</div>
+			<div class="mode-notice" v-if="mockMode">
+				<span class="mode-dot"></span>
+				<span class="mode-text">Mock camera mode is active. The live view is simulated and access decisions are not using physical camera input.</span>
+			</div>
+
+			<main class="grid">
+				<section class="panel" aria-labelledby="cameraTitle">
+					<div class="panel-header">
+						<h2 id="cameraTitle" class="panel-title">Live Camera</h2>
+						<span class="panel-meta">MJPEG stream</span>
+					</div>
+					<div class="video-wrap" :class="{ 'is-unavailable': !feedAvailable }">
+						<img class="video-stream" src="/mainview" alt="Live camera stream" @load="handleMainViewLoad" @error="handleMainViewError">
+						<div class="video-fallback" v-show="!feedAvailable">
+							<div class="video-fallback-inner">
+								<svg class="camera-icon" viewBox="0 0 96 96" role="img" aria-label="Camera unavailable">
+									<rect x="14" y="28" width="50" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="6"></rect>
+									<path d="M64 40l18-12v40L64 56z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="6"></path>
+									<path d="M18 78L78 18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="6"></path>
+								</svg>
+								<div class="fallback-title">Camera feed unavailable</div>
+								<p class="fallback-copy">The service is running, but the browser is not receiving a video stream.</p>
+							</div>
+						</div>
+						<div class="video-status">{{ cameraStatus }}</div>
+					</div>
+				</section>
+
+				<section class="panel" aria-labelledby="peopleTitle">
+					<div class="panel-header">
+						<h2 id="peopleTitle" class="panel-title">People</h2>
+						<span class="panel-meta">{{ peopleCountLabel }}</span>
+					</div>
+					<div class="people-tools">
+						<input class="search" type="search" placeholder="Search people" autocomplete="off" v-model="filter">
+						<button class="btn" type="button" :disabled="!filter" @click="filter = ''">Clear</button>
+					</div>
+					<div class="merge-bar" v-show="selectedPeople.length >= 2">
+						<span class="merge-count">{{ selectedCountLabel }}</span>
+						<label class="merge-target">
+							<span>Merge into</span>
+							<select class="merge-select" v-model="mergeTarget" :disabled="merging">
+								<option v-for="person in selectedPeople" :key="person.uid" :value="person.uid">
+									{{ displayName(person) }}
+								</option>
+							</select>
+						</label>
+						<button class="btn btn-primary" type="button" :disabled="merging || selectedPeople.length < 2" @click="openMergeModal">
+							Merge
+						</button>
+						<button class="btn" type="button" :disabled="merging" @click="clearSelection">Clear selection</button>
+					</div>
+					<div class="people-list" aria-live="polite">
+						<div v-if="!filteredPeople.length" class="empty">
+							{{ people.length ? 'No matching people' : 'No people enrolled' }}
+						</div>
+						<article
+							v-for="person in filteredPeople"
+							:key="person.uid"
+							class="person"
+							:class="{ 'is-selected': isSelected(person.uid) }"
+							:data-uid="person.uid"
+						>
+							<img class="person-image" :src="personImageUrl(person.uid)" :alt="displayName(person)">
+							<div class="person-main">
+								<div class="person-topline">
+									<label class="select-person">
+										<input
+											class="select-input"
+											type="checkbox"
+											:checked="isSelected(person.uid)"
+											@change="setSelected(person.uid, $event.target.checked)"
+										>
+										<span>Select</span>
+									</label>
+									<div class="person-name">
+										<input
+											class="name-input"
+											type="text"
+											autocomplete="off"
+											:value="displayName(person)"
+											@keydown.enter="$event.target.blur()"
+											@keydown.esc="resetNameInput($event, person)"
+											@blur="saveName(person.uid, $event.target.value.trim(), displayName(person))"
+										>
+										<div class="person-id">{{ sampleLabel(person) }}</div>
+									</div>
+								</div>
+								<div class="person-actions">
+									<label class="access" :class="{ 'is-allowed': Boolean(person.allowed) }">
+										<span class="access-label">{{ person.allowed ? 'Allowed' : 'Denied' }}</span>
+										<span class="switch">
+											<input
+												class="access-input"
+												type="checkbox"
+												:checked="Boolean(person.allowed)"
+												@change="toggleAccess(person.uid, $event.target)"
+											>
+											<span class="switch-track"></span>
+										</span>
+									</label>
+									<button
+										class="btn sample-button"
+										type="button"
+										:disabled="samplingUid === person.uid"
+										@click="captureSample(person.uid, displayName(person))"
+									>{{ samplingUid === person.uid ? 'Capturing...' : 'Add sample' }}</button>
+									<button class="btn btn-danger delete-button" type="button" @click="openDeleteModal(person)">Delete</button>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+			</main>
 		</div>
 
-		<main class="grid">
-			<section class="panel" aria-labelledby="cameraTitle">
-				<div class="panel-header">
-					<h2 id="cameraTitle" class="panel-title">Live Camera</h2>
-					<span class="panel-meta">MJPEG stream</span>
+		<div class="modal-backdrop" v-if="mergeModalOpen" @click.self="closeMergeModal">
+			<section class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeModalTitle" aria-describedby="mergeModalCopy">
+				<div class="modal-header">
+					<h2 id="mergeModalTitle" class="modal-title">Merge people</h2>
+					<button class="modal-close" type="button" aria-label="Close merge confirmation" :disabled="merging" @click="closeMergeModal">X</button>
 				</div>
-				<div id="videoWrap" class="video-wrap">
-					<img id="mainView" class="video-stream" src="/mainview" alt="Live camera stream">
-					<div id="videoFallback" class="video-fallback" hidden>
-						<div class="video-fallback-inner">
-							<svg class="camera-icon" viewBox="0 0 96 96" role="img" aria-label="Camera unavailable">
-								<rect x="14" y="28" width="50" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="6"></rect>
-								<path d="M64 40l18-12v40L64 56z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="6"></path>
-								<path d="M18 78L78 18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="6"></path>
-							</svg>
-							<div class="fallback-title">Camera feed unavailable</div>
-							<p class="fallback-copy">The service is running, but the browser is not receiving a video stream.</p>
-						</div>
+				<div class="modal-body">
+					<p id="mergeModalCopy" class="modal-copy">{{ mergeModalCopy }}</p>
+					<div class="merge-summary">
+						<div class="summary-label">Keep</div>
+						<div class="summary-person">{{ displayName(pendingMergeTargetPerson) }}</div>
+						<div class="summary-label">Merge in</div>
+						<ul class="summary-list">
+							<li v-for="person in pendingMergeSourcePeople" :key="person.uid" class="summary-item">
+								<label class="source-choice">
+									<input
+										class="source-choice-input"
+										type="checkbox"
+										:value="person.uid"
+										v-model="pendingMergeSourceIds"
+										:disabled="merging"
+									>
+									<img class="source-choice-image" :src="personImageUrl(person.uid)" :alt="displayName(person)" loading="lazy">
+									<span class="source-choice-main">
+										<span class="source-choice-name">{{ displayName(person) }}</span>
+										<span class="source-choice-id">{{ person.uid }}</span>
+									</span>
+								</label>
+							</li>
+						</ul>
 					</div>
-					<div id="cameraStatus" class="video-status">Stream loading</div>
+					<div v-if="mergeError" class="modal-error" role="alert">{{ mergeError }}</div>
+				</div>
+				<div class="modal-actions">
+					<button class="btn" type="button" :disabled="merging" @click="closeMergeModal">Cancel</button>
+					<button
+						ref="confirmMergeButton"
+						class="btn btn-primary"
+						type="button"
+						:disabled="merging || pendingMergeSourceIds.length < 1"
+						@click="mergeSelectedPeople"
+					>{{ merging ? 'Merging...' : 'Merge people' }}</button>
 				</div>
 			</section>
+		</div>
 
-			<section class="panel" aria-labelledby="peopleTitle">
-				<div class="panel-header">
-					<h2 id="peopleTitle" class="panel-title">People</h2>
-					<span id="peopleCount" class="panel-meta">0 users</span>
+		<div class="modal-backdrop" v-if="deleteModalOpen" @click.self="closeDeleteModal">
+			<section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-describedby="deleteModalCopy">
+				<div class="modal-header">
+					<h2 id="deleteModalTitle" class="modal-title">Delete person</h2>
+					<button class="modal-close" type="button" aria-label="Close delete confirmation" :disabled="deleting" @click="closeDeleteModal">X</button>
 				</div>
-				<div class="people-tools">
-					<input id="searchInput" class="search" type="search" placeholder="Search people" autocomplete="off">
-					<button id="clearSearchButton" class="btn" type="button">Clear</button>
-				</div>
-				<div id="mergeBar" class="merge-bar" hidden>
-					<span id="mergeCount" class="merge-count">0 selected</span>
-					<label class="merge-target">
-						<span>Merge into</span>
-						<select id="mergeTarget" class="merge-select"></select>
-					</label>
-					<button id="mergeButton" class="btn btn-primary" type="button">Merge</button>
-					<button id="clearSelectionButton" class="btn" type="button">Clear selection</button>
-				</div>
-				<div id="peopleList" class="people-list" aria-live="polite"></div>
-			</section>
-		</main>
-	</div>
-
-	<template id="personTemplate">
-		<article class="person">
-			<img class="person-image" alt="">
-			<div class="person-main">
-				<div class="person-topline">
-					<label class="select-person">
-						<input class="select-input" type="checkbox">
-						<span>Select</span>
-					</label>
-					<div class="person-name">
-						<input class="name-input" type="text" autocomplete="off">
-						<div class="person-id"></div>
+				<div class="modal-body">
+					<p id="deleteModalCopy" class="modal-copy">This removes the saved face image, embedding, access setting, and display name for this person.</p>
+					<div class="merge-summary">
+						<div class="summary-label">Delete</div>
+						<div class="summary-person">{{ pendingDelete ? pendingDelete.name : '' }}</div>
 					</div>
+					<div v-if="deleteError" class="modal-error" role="alert">{{ deleteError }}</div>
 				</div>
-				<div class="person-actions">
-					<label class="access">
-						<span class="access-label">Denied</span>
-						<span class="switch">
-							<input class="access-input" type="checkbox">
-							<span class="switch-track"></span>
-						</span>
-					</label>
-					<button class="btn btn-danger delete-button" type="button">Delete</button>
+				<div class="modal-actions">
+					<button class="btn" type="button" :disabled="deleting" @click="closeDeleteModal">Cancel</button>
+					<button
+						ref="confirmDeleteButton"
+						class="btn btn-danger"
+						type="button"
+						:disabled="deleting"
+						@click="deletePerson"
+					>{{ deleting ? 'Deleting...' : 'Delete person' }}</button>
 				</div>
-			</div>
-		</article>
-	</template>
-
-	<div id="mergeModal" class="modal-backdrop" hidden>
-		<section class="modal" role="dialog" aria-modal="true" aria-labelledby="mergeModalTitle" aria-describedby="mergeModalCopy">
-			<div class="modal-header">
-				<h2 id="mergeModalTitle" class="modal-title">Merge people</h2>
-				<button id="mergeModalClose" class="modal-close" type="button" aria-label="Close merge confirmation">X</button>
-			</div>
-			<div class="modal-body">
-				<p id="mergeModalCopy" class="modal-copy"></p>
-				<div class="merge-summary">
-					<div class="summary-label">Keep</div>
-					<div id="mergeModalTarget" class="summary-person"></div>
-					<div class="summary-label">Merge in</div>
-					<ul id="mergeModalSources" class="summary-list"></ul>
-				</div>
-				<div id="mergeModalError" class="modal-error" role="alert" hidden></div>
-			</div>
-			<div class="modal-actions">
-				<button id="cancelMergeButton" class="btn" type="button">Cancel</button>
-				<button id="confirmMergeButton" class="btn btn-primary" type="button">Merge people</button>
-			</div>
-		</section>
+			</section>
+		</div>
 	</div>
 
-	<div id="deleteModal" class="modal-backdrop" hidden>
-		<section class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-describedby="deleteModalCopy">
-			<div class="modal-header">
-				<h2 id="deleteModalTitle" class="modal-title">Delete person</h2>
-				<button id="deleteModalClose" class="modal-close" type="button" aria-label="Close delete confirmation">X</button>
-			</div>
-			<div class="modal-body">
-				<p id="deleteModalCopy" class="modal-copy">This removes the saved face image, embedding, access setting, and display name for this person.</p>
-				<div class="merge-summary">
-					<div class="summary-label">Delete</div>
-					<div id="deleteModalPerson" class="summary-person"></div>
-				</div>
-				<div id="deleteModalError" class="modal-error" role="alert" hidden></div>
-			</div>
-			<div class="modal-actions">
-				<button id="cancelDeleteButton" class="btn" type="button">Cancel</button>
-				<button id="confirmDeleteButton" class="btn btn-danger" type="button">Delete person</button>
-			</div>
-		</section>
-	</div>
-
+	<script src="/vue.global.prod.js"></script>
 	<script>
-		const state = {
-			people: [],
-			filter: '',
-			loading: false,
-			merging: false,
-			deleting: false,
-			mockMode: false,
-			feedAvailable: true,
-			selected: new Set(),
-			mergeTarget: '',
-			pendingMerge: null,
-			pendingDelete: null,
-			lastFocusedElement: null,
-		};
-
-		const elements = {
-			notice: document.getElementById('notice'),
-			mockNotice: document.getElementById('mockNotice'),
-			status: document.getElementById('serviceStatus'),
-			statusText: document.getElementById('serviceStatusText'),
-			refreshButton: document.getElementById('refreshButton'),
-			searchInput: document.getElementById('searchInput'),
-			clearSearchButton: document.getElementById('clearSearchButton'),
-			mergeBar: document.getElementById('mergeBar'),
-			mergeCount: document.getElementById('mergeCount'),
-			mergeTarget: document.getElementById('mergeTarget'),
-			mergeButton: document.getElementById('mergeButton'),
-			clearSelectionButton: document.getElementById('clearSelectionButton'),
-			mergeModal: document.getElementById('mergeModal'),
-			mergeModalClose: document.getElementById('mergeModalClose'),
-			mergeModalCopy: document.getElementById('mergeModalCopy'),
-			mergeModalTarget: document.getElementById('mergeModalTarget'),
-			mergeModalSources: document.getElementById('mergeModalSources'),
-			mergeModalError: document.getElementById('mergeModalError'),
-			cancelMergeButton: document.getElementById('cancelMergeButton'),
-			confirmMergeButton: document.getElementById('confirmMergeButton'),
-			deleteModal: document.getElementById('deleteModal'),
-			deleteModalClose: document.getElementById('deleteModalClose'),
-			deleteModalPerson: document.getElementById('deleteModalPerson'),
-			deleteModalError: document.getElementById('deleteModalError'),
-			cancelDeleteButton: document.getElementById('cancelDeleteButton'),
-			confirmDeleteButton: document.getElementById('confirmDeleteButton'),
-			peopleList: document.getElementById('peopleList'),
-			peopleCount: document.getElementById('peopleCount'),
-			template: document.getElementById('personTemplate'),
-			videoWrap: document.getElementById('videoWrap'),
-			mainView: document.getElementById('mainView'),
-			videoFallback: document.getElementById('videoFallback'),
-			cameraStatus: document.getElementById('cameraStatus'),
-		};
-
-		function setNotice(message) {
-			elements.notice.textContent = message || '';
-			elements.notice.classList.toggle('is-visible', Boolean(message));
+		if (!window.Vue) {
+			throw new Error('Vue runtime failed to load from /vue.global.prod.js');
 		}
 
-		function setServiceStatus(kind, text) {
-			elements.status.classList.toggle('is-online', kind === 'online');
-			elements.status.classList.toggle('is-error', kind === 'error');
-			elements.statusText.textContent = text;
-		}
+		const { createApp } = Vue;
 
-		function setFeedAvailable(available, text) {
-			state.feedAvailable = available;
-			elements.videoWrap.classList.toggle('is-unavailable', !available);
-			elements.videoFallback.hidden = available;
-			elements.cameraStatus.textContent = text;
-		}
-
-		function setMockMode(enabled) {
-			state.mockMode = enabled;
-			elements.mockNotice.hidden = !enabled;
-			if (enabled && state.feedAvailable) {
-				elements.cameraStatus.textContent = 'Mock stream active';
-			}
-		}
-
-		function displayName(person) {
-			if (!person) {
-				return '';
-			}
-			return person.name || person.friendly || person.uid;
-		}
-
-		function filteredPeople() {
-			const filter = state.filter.trim().toLowerCase();
-			if (!filter) {
-				return state.people;
-			}
-
-			return state.people.filter((person) => {
-				return [
-					person.uid,
-					person.name,
-					person.friendly,
-					person.allowed ? 'allowed' : 'denied',
-				].some((value) => String(value || '').toLowerCase().includes(filter));
-			});
-		}
-
-		function selectedPeople() {
-			const knownIds = new Set(state.people.map((person) => person.uid));
-			for (const uid of [...state.selected]) {
-				if (!knownIds.has(uid)) {
-					state.selected.delete(uid);
-				}
-			}
-
-			return state.people.filter((person) => state.selected.has(person.uid));
-		}
-
-		function renderMergeBar() {
-			const selected = selectedPeople();
-			elements.mergeBar.hidden = selected.length < 2;
-			elements.mergeCount.textContent = `${selected.length} selected`;
-			elements.mergeButton.disabled = state.merging || selected.length < 2;
-			elements.mergeTarget.disabled = state.merging;
-			elements.clearSelectionButton.disabled = state.merging;
-
-			if (selected.length < 2) {
-				state.mergeTarget = '';
-				elements.mergeTarget.replaceChildren();
-				return;
-			}
-
-			if (!selected.some((person) => person.uid === state.mergeTarget)) {
-				state.mergeTarget = selected[0].uid;
-			}
-
-			elements.mergeTarget.replaceChildren();
-			for (const person of selected) {
-				const option = document.createElement('option');
-				option.value = person.uid;
-				option.textContent = displayName(person);
-				option.selected = person.uid === state.mergeTarget;
-				elements.mergeTarget.append(option);
-			}
-		}
-
-		function clearSelection() {
-			state.selected.clear();
-			state.mergeTarget = '';
-			renderPeople();
-		}
-
-		function setMergeModalError(message) {
-			elements.mergeModalError.textContent = message || '';
-			elements.mergeModalError.hidden = !message;
-		}
-
-		function setMergeModalBusy(busy) {
-			elements.confirmMergeButton.disabled = busy;
-			elements.cancelMergeButton.disabled = busy;
-			elements.mergeModalClose.disabled = busy;
-			elements.confirmMergeButton.textContent = busy ? 'Merging...' : 'Merge people';
-		}
-
-		function closeMergeModal() {
-			if (state.merging) {
-				return;
-			}
-
-			elements.mergeModal.hidden = true;
-			document.body.classList.remove('is-modal-open');
-			setMergeModalError('');
-			state.pendingMerge = null;
-
-			if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
-				state.lastFocusedElement.focus();
-			}
-			state.lastFocusedElement = null;
-		}
-
-		function openMergeModal() {
-			const selected = selectedPeople();
-			if (selected.length < 2) {
-				return;
-			}
-
-			let target = state.mergeTarget || selected[0].uid;
-			if (!selected.some((person) => person.uid === target)) {
-				target = selected[0].uid;
-				state.mergeTarget = target;
-			}
-			const targetPerson = selected.find((person) => person.uid === target);
-			const sources = selected.map((person) => person.uid).filter((uid) => uid !== target);
-			const sourcePeople = selected.filter((person) => person.uid !== target);
-			const label = sources.length === 1 ? 'person' : 'people';
-
-			state.pendingMerge = { target, sources };
-			state.lastFocusedElement = document.activeElement;
-			elements.mergeModalCopy.textContent = `Merge ${sources.length} selected ${label} into ${displayName(targetPerson)}. The selected target identity will be kept.`;
-			elements.mergeModalTarget.textContent = displayName(targetPerson);
-			elements.mergeModalSources.replaceChildren();
-			for (const person of sourcePeople) {
-				const item = document.createElement('li');
-				item.textContent = displayName(person);
-				elements.mergeModalSources.append(item);
-			}
-
-			setMergeModalError('');
-			setMergeModalBusy(false);
-			elements.mergeModal.hidden = false;
-			document.body.classList.add('is-modal-open');
-			elements.confirmMergeButton.focus();
-		}
-
-		function setDeleteModalError(message) {
-			elements.deleteModalError.textContent = message || '';
-			elements.deleteModalError.hidden = !message;
-		}
-
-		function setDeleteModalBusy(busy) {
-			elements.confirmDeleteButton.disabled = busy;
-			elements.cancelDeleteButton.disabled = busy;
-			elements.deleteModalClose.disabled = busy;
-			elements.confirmDeleteButton.textContent = busy ? 'Deleting...' : 'Delete person';
-		}
-
-		function closeDeleteModal() {
-			if (state.deleting) {
-				return;
-			}
-
-			elements.deleteModal.hidden = true;
-			document.body.classList.remove('is-modal-open');
-			setDeleteModalError('');
-			state.pendingDelete = null;
-
-			if (state.lastFocusedElement && typeof state.lastFocusedElement.focus === 'function') {
-				state.lastFocusedElement.focus();
-			}
-			state.lastFocusedElement = null;
-		}
-
-		function openDeleteModal(uid, name) {
-			state.pendingDelete = { uid, name };
-			state.lastFocusedElement = document.activeElement;
-			elements.deleteModalPerson.textContent = name;
-			setDeleteModalError('');
-			setDeleteModalBusy(false);
-			elements.deleteModal.hidden = false;
-			document.body.classList.add('is-modal-open');
-			elements.confirmDeleteButton.focus();
-		}
-
-		function renderPeople() {
-			const people = filteredPeople();
-			elements.peopleList.replaceChildren();
-			elements.peopleCount.textContent = `${state.people.length} ${state.people.length === 1 ? 'user' : 'users'}`;
-
-			if (!people.length) {
-				const empty = document.createElement('div');
-				empty.className = 'empty';
-				empty.textContent = state.people.length ? 'No matching people' : 'No people enrolled';
-				elements.peopleList.append(empty);
-				renderMergeBar();
-				return;
-			}
-
-			for (const person of people) {
-				const fragment = elements.template.content.cloneNode(true);
-				const row = fragment.querySelector('.person');
-				const image = fragment.querySelector('.person-image');
-				const input = fragment.querySelector('.name-input');
-				const id = fragment.querySelector('.person-id');
-				const selectInput = fragment.querySelector('.select-input');
-				const access = fragment.querySelector('.access');
-				const accessLabel = fragment.querySelector('.access-label');
-				const accessInput = fragment.querySelector('.access-input');
-				const deleteButton = fragment.querySelector('.delete-button');
-
-				row.dataset.uid = person.uid;
-				row.classList.toggle('is-selected', state.selected.has(person.uid));
-				image.src = `/image/${encodeURIComponent(person.uid)}`;
-				image.alt = displayName(person);
-				input.value = displayName(person);
-				input.dataset.originalValue = input.value;
-				id.textContent = person.uid;
-				selectInput.checked = state.selected.has(person.uid);
-				access.classList.toggle('is-allowed', Boolean(person.allowed));
-				accessLabel.textContent = person.allowed ? 'Allowed' : 'Denied';
-				accessInput.checked = Boolean(person.allowed);
-
-				selectInput.addEventListener('change', () => {
-					if (selectInput.checked) {
-						state.selected.add(person.uid);
-					} else {
-						state.selected.delete(person.uid);
-					}
-					if (!state.selected.has(state.mergeTarget)) {
-						state.mergeTarget = '';
-					}
-					renderPeople();
-				});
-
-				input.addEventListener('keydown', (event) => {
-					if (event.key === 'Enter') {
-						input.blur();
-					}
-					if (event.key === 'Escape') {
-						input.value = input.dataset.originalValue;
-						input.blur();
-					}
-				});
-
-				input.addEventListener('blur', () => {
-					const value = input.value.trim();
-					if (value !== input.dataset.originalValue) {
-						saveName(person.uid, value);
-					}
-				});
-
-				accessInput.addEventListener('change', () => {
-					toggleAccess(person.uid, accessInput);
-				});
-
-				deleteButton.addEventListener('click', () => {
-					openDeleteModal(person.uid, displayName(person));
-				});
-
-				elements.peopleList.append(fragment);
-			}
-
-			renderMergeBar();
-		}
-
-		async function requestJson(url, options) {
-			const response = await fetch(url, {
-				headers: {
-					'Content-Type': 'application/json',
+		createApp({
+			data() {
+				return {
+					people: [],
+					filter: '',
+					loading: false,
+					merging: false,
+					deleting: false,
+					doorBusy: false,
+					doorState: null,
+					mockMode: false,
+					feedAvailable: true,
+					selectedOrder: [],
+					mergeTarget: '',
+					mergeModalOpen: false,
+					pendingMergeTarget: '',
+					pendingMergeSourceIds: [],
+					mergeError: '',
+					deleteModalOpen: false,
+					pendingDelete: null,
+					deleteError: '',
+					samplingUid: '',
+					serviceKind: 'checking',
+					serviceText: 'Checking service',
+					notice: '',
+					cameraStatus: 'Stream loading',
+					statusTimer: null,
+					peopleTimer: null,
+					lastFocusedElement: null,
+				};
+			},
+			computed: {
+				serviceStatusClass() {
+					return {
+						'is-online': this.serviceKind === 'online',
+						'is-error': this.serviceKind === 'error',
+					};
 				},
-				...options,
-			});
+				doorStatusClass() {
+					const state = this.doorState && this.doorState.state;
+					return {
+						'is-locked': state === 'locked',
+						'is-unlocked': state === 'unlocked',
+						'is-error': state === 'error',
+					};
+				},
+				doorStatusText() {
+					const door = this.doorState;
+					if (!door) {
+						return 'Lock state unknown';
+					}
+					if (door.state === 'unlocked') {
+						const remaining = Math.ceil(Number(door.remainingSeconds || 0));
+						return remaining > 0 ? `Unlocked (${remaining}s)` : 'Unlocked';
+					}
+					if (door.state === 'locked') {
+						return 'Locked';
+					}
+					if (door.state === 'error') {
+						return 'Lock state error';
+					}
+					return 'Lock state unknown';
+				},
+				doorAction() {
+					return this.doorState && this.doorState.state === 'unlocked' ? 'lock' : 'unlock';
+				},
+				doorButtonText() {
+					if (this.doorBusy) {
+						return this.doorAction === 'unlock' ? 'Unlocking...' : 'Locking...';
+					}
+					return this.doorAction === 'unlock' ? 'Unlock' : 'Lock now';
+				},
+				doorButtonClass() {
+					return {
+						'btn-success': this.doorAction === 'unlock',
+						'btn-danger': this.doorAction === 'lock',
+					};
+				},
+				peopleById() {
+					return new Map(this.people.map((person) => [person.uid, person]));
+				},
+				selectedIdSet() {
+					return new Set(this.selectedOrder);
+				},
+				selectedPeople() {
+					return this.selectedOrder
+						.map((uid) => this.peopleById.get(uid))
+						.filter(Boolean);
+				},
+				filteredPeople() {
+					const filter = this.filter.trim().toLowerCase();
+					if (!filter) {
+						return this.people;
+					}
+					return this.people.filter((person) => {
+						return [
+							person.uid,
+							person.name,
+							person.friendly,
+							person.allowed ? 'allowed' : 'denied',
+						].some((value) => String(value || '').toLowerCase().includes(filter));
+					});
+				},
+				peopleCountLabel() {
+					return `${this.people.length} ${this.people.length === 1 ? 'user' : 'users'}`;
+				},
+				selectedCountLabel() {
+					return `${this.selectedPeople.length} selected`;
+				},
+				pendingMergeTargetPerson() {
+					return this.peopleById.get(this.pendingMergeTarget) || null;
+				},
+				pendingMergeSourcePeople() {
+					return this.selectedPeople.filter((person) => person.uid !== this.pendingMergeTarget);
+				},
+				mergeModalCopy() {
+					const targetName = this.displayName(this.pendingMergeTargetPerson);
+					const count = this.pendingMergeSourceIds.length;
+					const label = count === 1 ? 'person' : 'people';
+					if (!count) {
+						return `Choose at least one source profile to merge into ${targetName}.`;
+					}
+					return `Merge ${count} selected ${label} into ${targetName}. The selected target identity will be kept.`;
+				},
+			},
+			methods: {
+				setServiceStatus(kind, text) {
+					this.serviceKind = kind;
+					this.serviceText = text;
+				},
+				displayName(person) {
+					if (!person) {
+						return '';
+					}
+					return person.name || person.friendly || person.uid;
+				},
+				personImageUrl(uid) {
+					return `/image/${encodeURIComponent(uid)}`;
+				},
+				sampleLabel(person) {
+					const sampleCount = Number(person.samples || 1);
+					return `${person.uid} · ${sampleCount} ${sampleCount === 1 ? 'sample' : 'samples'}`;
+				},
+				isSelected(uid) {
+					return this.selectedIdSet.has(uid);
+				},
+				setSelected(uid, checked) {
+					if (checked && !this.selectedOrder.includes(uid)) {
+						this.selectedOrder.push(uid);
+					}
+					if (!checked) {
+						this.selectedOrder = this.selectedOrder.filter((selectedUid) => selectedUid !== uid);
+					}
+					this.syncMergeTarget();
+				},
+				pruneSelection() {
+					const knownIds = new Set(this.people.map((person) => person.uid));
+					this.selectedOrder = this.selectedOrder.filter((uid) => knownIds.has(uid));
+					this.syncMergeTarget();
+				},
+				syncMergeTarget() {
+					if (this.selectedOrder.length < 2) {
+						this.mergeTarget = '';
+						return;
+					}
+					if (!this.selectedOrder.includes(this.mergeTarget)) {
+						this.mergeTarget = this.selectedOrder[0];
+					}
+				},
+				clearSelection() {
+					this.selectedOrder = [];
+					this.mergeTarget = '';
+				},
+				resetNameInput(event, person) {
+					event.target.value = this.displayName(person);
+					event.target.blur();
+				},
+				updateBodyModalClass() {
+					document.body.classList.toggle('is-modal-open', this.mergeModalOpen || this.deleteModalOpen);
+				},
+				openMergeModal() {
+					this.syncMergeTarget();
+					if (this.selectedPeople.length < 2) {
+						return;
+					}
+					const target = this.mergeTarget || this.selectedPeople[0].uid;
+					this.pendingMergeTarget = target;
+					this.pendingMergeSourceIds = this.selectedPeople
+						.filter((person) => person.uid !== target)
+						.map((person) => person.uid);
+					this.mergeError = '';
+					this.lastFocusedElement = document.activeElement;
+					this.mergeModalOpen = true;
+					this.updateBodyModalClass();
+					this.$nextTick(() => {
+						if (this.$refs.confirmMergeButton) {
+							this.$refs.confirmMergeButton.focus();
+						}
+					});
+				},
+				closeMergeModal(force = false) {
+					if (this.merging && !force) {
+						return;
+					}
+					this.mergeModalOpen = false;
+					this.pendingMergeTarget = '';
+					this.pendingMergeSourceIds = [];
+					this.mergeError = '';
+					this.updateBodyModalClass();
+					this.restoreFocus();
+				},
+				openDeleteModal(person) {
+					this.pendingDelete = { uid: person.uid, name: this.displayName(person) };
+					this.deleteError = '';
+					this.lastFocusedElement = document.activeElement;
+					this.deleteModalOpen = true;
+					this.updateBodyModalClass();
+					this.$nextTick(() => {
+						if (this.$refs.confirmDeleteButton) {
+							this.$refs.confirmDeleteButton.focus();
+						}
+					});
+				},
+				closeDeleteModal(force = false) {
+					if (this.deleting && !force) {
+						return;
+					}
+					this.deleteModalOpen = false;
+					this.pendingDelete = null;
+					this.deleteError = '';
+					this.updateBodyModalClass();
+					this.restoreFocus();
+				},
+				restoreFocus() {
+					this.$nextTick(() => {
+						if (this.lastFocusedElement && typeof this.lastFocusedElement.focus === 'function') {
+							this.lastFocusedElement.focus();
+						}
+						this.lastFocusedElement = null;
+					});
+				},
+				async requestJson(url, options = {}) {
+					const response = await fetch(url, {
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						...options,
+					});
 
-			const contentType = response.headers.get('content-type') || '';
-			let payload;
-			if (contentType.includes('application/json')) {
-				payload = await response.json();
-			} else {
-				payload = await response.text();
-			}
+					const contentType = response.headers.get('content-type') || '';
+					let payload;
+					if (contentType.includes('application/json')) {
+						payload = await response.json();
+					} else {
+						payload = await response.text();
+					}
 
-			if (!response.ok) {
-				const errorText = payload && typeof payload === 'object'
-					? payload.error || payload.message
-					: payload;
-				throw new Error(errorText || `${response.status} ${response.statusText}`);
-			}
+					if (!response.ok) {
+						const errorText = payload && typeof payload === 'object'
+							? payload.error || payload.message
+							: payload;
+						throw new Error(errorText || `${response.status} ${response.statusText}`);
+					}
+					return payload;
+				},
+				async loadPeople(options = {}) {
+					if (this.loading) {
+						return;
+					}
+					const preserveScroll = options.preserveScroll !== false && this.people.length > 0;
+					const scrollY = window.scrollY;
 
-			return payload;
-		}
-
-		async function loadPeople() {
-			if (state.loading) {
-				return;
-			}
-
-			state.loading = true;
-			elements.refreshButton.disabled = true;
-			setServiceStatus('checking', 'Refreshing');
-
-			try {
-				const people = await requestJson('/names');
-				state.people = Array.isArray(people) ? people : [];
-				setNotice('');
-				setServiceStatus('online', 'Online');
-				renderPeople();
-			} catch (error) {
-				setNotice(`Could not load people: ${error.message}`);
-				setServiceStatus('error', 'Service error');
-			} finally {
-				state.loading = false;
-				elements.refreshButton.disabled = false;
-			}
-		}
-
-		async function loadStatus() {
-			try {
-				const status = await requestJson('/status');
-				setMockMode(Boolean(status.mockMode));
-			} catch (error) {
-				setMockMode(false);
-			}
-		}
-
-		async function toggleAccess(uid, checkbox) {
-			checkbox.disabled = true;
-			try {
-				await requestJson('/access', {
-					method: 'POST',
-					body: JSON.stringify({ uid }),
-				});
-				await loadPeople();
-			} catch (error) {
-				setNotice(`Could not update access: ${error.message}`);
-				checkbox.checked = !checkbox.checked;
-				renderPeople();
-			}
-		}
-
-		async function saveName(uid, name) {
-			try {
-				await requestJson('/set', {
-					method: 'POST',
-					body: JSON.stringify({ uid, name }),
-				});
-				await loadPeople();
-			} catch (error) {
-				setNotice(`Could not save name: ${error.message}`);
-				await loadPeople();
-			}
-		}
-
-		async function deletePerson() {
-			if (!state.pendingDelete) {
-				return;
-			}
-
-			const { uid } = state.pendingDelete;
-			state.deleting = true;
-			setDeleteModalBusy(true);
-			setDeleteModalError('');
-
-			try {
-				await requestJson('/delete', {
-					method: 'POST',
-					body: JSON.stringify([uid]),
-				});
-				state.selected.delete(uid);
-				if (state.mergeTarget === uid) {
-					state.mergeTarget = '';
-				}
-				await loadPeople();
-				state.pendingDelete = null;
-				elements.deleteModal.hidden = true;
+					this.loading = true;
+					this.setServiceStatus('checking', 'Refreshing');
+					try {
+						const people = await this.requestJson('/names');
+						this.people = Array.isArray(people) ? people : [];
+						this.pruneSelection();
+						this.notice = '';
+						this.setServiceStatus('online', 'Online');
+						if (preserveScroll) {
+							this.$nextTick(() => window.scrollTo(0, scrollY));
+						}
+					} catch (error) {
+						this.notice = `Could not load people: ${error.message}`;
+						this.setServiceStatus('error', 'Service error');
+					} finally {
+						this.loading = false;
+					}
+				},
+				async loadStatus() {
+					try {
+						const status = await this.requestJson('/status');
+						this.mockMode = Boolean(status.mockMode);
+						this.doorState = status.door || null;
+						if (this.mockMode && this.feedAvailable) {
+							this.cameraStatus = 'Mock stream active';
+						}
+					} catch (error) {
+						this.mockMode = false;
+						this.doorState = null;
+					}
+				},
+				async manualDoorAction(action) {
+					if (this.doorBusy) {
+						return;
+					}
+					this.doorBusy = true;
+					try {
+						const result = await this.requestJson('/door', {
+							method: 'POST',
+							body: JSON.stringify({ action }),
+						});
+						if (!result.ok) {
+							throw new Error(result.error || 'door control failed');
+						}
+						this.doorState = result.door || null;
+						this.notice = '';
+						this.setServiceStatus('online', action === 'unlock' ? 'Unlock triggered' : 'Lock triggered');
+					} catch (error) {
+						this.notice = `Could not ${action} door: ${error.message}`;
+						this.setServiceStatus('error', 'Door control error');
+					} finally {
+						this.doorBusy = false;
+					}
+				},
+				async captureSample(uid, name) {
+					this.samplingUid = uid;
+					try {
+						const result = await this.requestJson('/sample', {
+							method: 'POST',
+							body: JSON.stringify({ uid }),
+						});
+						if (!result.ok) {
+							throw new Error(result.error || 'sample capture failed');
+						}
+						this.notice = '';
+						this.setServiceStatus('online', `Sample added for ${name}`);
+						await this.loadPeople();
+					} catch (error) {
+						this.notice = `Could not add sample for ${name}: ${error.message}`;
+					} finally {
+						this.samplingUid = '';
+					}
+				},
+				async toggleAccess(uid, checkbox) {
+					checkbox.disabled = true;
+					try {
+						await this.requestJson('/access', {
+							method: 'POST',
+							body: JSON.stringify({ uid }),
+						});
+						await this.loadPeople();
+					} catch (error) {
+						this.notice = `Could not update access: ${error.message}`;
+						checkbox.checked = !checkbox.checked;
+					} finally {
+						checkbox.disabled = false;
+					}
+				},
+				async saveName(uid, name, previousName) {
+					if (name === previousName) {
+						return;
+					}
+					try {
+						await this.requestJson('/set', {
+							method: 'POST',
+							body: JSON.stringify({ uid, name }),
+						});
+						await this.loadPeople();
+					} catch (error) {
+						this.notice = `Could not save name: ${error.message}`;
+						await this.loadPeople();
+					}
+				},
+				async deletePerson() {
+					if (!this.pendingDelete) {
+						return;
+					}
+					const { uid } = this.pendingDelete;
+					this.deleting = true;
+					this.deleteError = '';
+					try {
+						await this.requestJson('/delete', {
+							method: 'POST',
+							body: JSON.stringify([uid]),
+						});
+						this.selectedOrder = this.selectedOrder.filter((selectedUid) => selectedUid !== uid);
+						if (this.mergeTarget === uid) {
+							this.mergeTarget = '';
+						}
+						this.closeDeleteModal(true);
+						await this.loadPeople();
+					} catch (error) {
+						this.deleteError = `Could not delete person: ${error.message}`;
+					} finally {
+						this.deleting = false;
+					}
+				},
+				async mergeSelectedPeople() {
+					const target = this.pendingMergeTarget;
+					const sources = [...this.pendingMergeSourceIds];
+					if (!target || !sources.length) {
+						return;
+					}
+					this.merging = true;
+					this.mergeError = '';
+					try {
+						const result = await this.requestJson('/merge', {
+							method: 'POST',
+							body: JSON.stringify({ target, sources }),
+						});
+						if (!result.ok) {
+							throw new Error(result.error || 'merge failed');
+						}
+						this.selectedOrder = [];
+						this.mergeTarget = '';
+						this.notice = '';
+						this.closeMergeModal(true);
+						await this.loadPeople();
+					} catch (error) {
+						this.mergeError = `Could not merge people: ${error.message}`;
+					} finally {
+						this.merging = false;
+					}
+				},
+				handleMainViewLoad() {
+					this.feedAvailable = true;
+					this.cameraStatus = this.mockMode ? 'Mock stream active' : 'Stream connected';
+				},
+				handleMainViewError() {
+					this.feedAvailable = false;
+					this.cameraStatus = '';
+				},
+				handleKeydown(event) {
+					if (event.key !== 'Escape') {
+						return;
+					}
+					if (this.mergeModalOpen) {
+						this.closeMergeModal();
+					} else if (this.deleteModalOpen) {
+						this.closeDeleteModal();
+					}
+				},
+			},
+			mounted() {
+				this.loadStatus();
+				this.loadPeople({ preserveScroll: false });
+				this.statusTimer = window.setInterval(() => this.loadStatus(), 2000);
+				this.peopleTimer = window.setInterval(() => this.loadPeople(), 15000);
+				document.addEventListener('keydown', this.handleKeydown);
+			},
+			beforeUnmount() {
+				window.clearInterval(this.statusTimer);
+				window.clearInterval(this.peopleTimer);
+				document.removeEventListener('keydown', this.handleKeydown);
 				document.body.classList.remove('is-modal-open');
-				setDeleteModalError('');
-				state.lastFocusedElement = null;
-			} catch (error) {
-				setDeleteModalError(`Could not delete person: ${error.message}`);
-			} finally {
-				state.deleting = false;
-				setDeleteModalBusy(false);
-			}
-		}
-
-		async function mergeSelectedPeople() {
-			if (!state.pendingMerge) {
-				return;
-			}
-
-			const { target, sources } = state.pendingMerge;
-
-			state.merging = true;
-			renderMergeBar();
-			setMergeModalBusy(true);
-			setMergeModalError('');
-
-			try {
-				const result = await requestJson('/merge', {
-					method: 'POST',
-					body: JSON.stringify({ target, sources }),
-				});
-				if (!result.ok) {
-					throw new Error(result.error || 'merge failed');
-				}
-				state.selected.clear();
-				state.mergeTarget = '';
-				setNotice('');
-				await loadPeople();
-				state.pendingMerge = null;
-				elements.mergeModal.hidden = true;
-				document.body.classList.remove('is-modal-open');
-				setMergeModalError('');
-				state.lastFocusedElement = null;
-			} catch (error) {
-				setMergeModalError(`Could not merge people: ${error.message}`);
-			} finally {
-				state.merging = false;
-				setMergeModalBusy(false);
-				renderMergeBar();
-			}
-		}
-
-		elements.refreshButton.addEventListener('click', loadPeople);
-		elements.searchInput.addEventListener('input', (event) => {
-			state.filter = event.target.value;
-			renderPeople();
-		});
-		elements.clearSearchButton.addEventListener('click', () => {
-			state.filter = '';
-			elements.searchInput.value = '';
-			renderPeople();
-		});
-		elements.mergeTarget.addEventListener('change', (event) => {
-			state.mergeTarget = event.target.value;
-			renderMergeBar();
-		});
-		elements.mergeButton.addEventListener('click', openMergeModal);
-		elements.clearSelectionButton.addEventListener('click', clearSelection);
-		elements.confirmMergeButton.addEventListener('click', mergeSelectedPeople);
-		elements.cancelMergeButton.addEventListener('click', closeMergeModal);
-		elements.mergeModalClose.addEventListener('click', closeMergeModal);
-		elements.confirmDeleteButton.addEventListener('click', deletePerson);
-		elements.cancelDeleteButton.addEventListener('click', closeDeleteModal);
-		elements.deleteModalClose.addEventListener('click', closeDeleteModal);
-		elements.mergeModal.addEventListener('click', (event) => {
-			if (event.target === elements.mergeModal) {
-				closeMergeModal();
-			}
-		});
-		elements.deleteModal.addEventListener('click', (event) => {
-			if (event.target === elements.deleteModal) {
-				closeDeleteModal();
-			}
-		});
-		document.addEventListener('keydown', (event) => {
-			if (event.key === 'Escape' && !elements.mergeModal.hidden) {
-				closeMergeModal();
-			}
-			if (event.key === 'Escape' && !elements.deleteModal.hidden) {
-				closeDeleteModal();
-			}
-		});
-
-		elements.mainView.addEventListener('load', () => {
-			setFeedAvailable(true, state.mockMode ? 'Mock stream active' : 'Stream connected');
-		});
-		elements.mainView.addEventListener('error', () => {
-			setFeedAvailable(false, '');
-		});
-
-		loadStatus();
-		loadPeople();
-		window.setInterval(() => {
-			loadStatus();
-			loadPeople();
-		}, 15000);
+			},
+		}).mount('#app');
 	</script>
 </body>
 </html>
