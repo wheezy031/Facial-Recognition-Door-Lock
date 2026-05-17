@@ -57,6 +57,11 @@ async def index(request):
     return await sanic_response.file(str(APP_DIR / 'index' / 'index.html'))
 
 
+@app.route('/vue.global.prod.js')
+async def vue_runtime(request):
+    return await sanic_response.file(str(APP_DIR / 'index' / 'vue.global.prod.js'))
+
+
 @app.route('/status')
 async def status(request):
     backend = camera_backend()
