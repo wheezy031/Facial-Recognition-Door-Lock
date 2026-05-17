@@ -853,6 +853,10 @@
 						<span class="status-dot"></span>
 						<span>{{ serviceText }}</span>
 					</div>
+					<div class="status-pill" :class="cameraWorkerStatusClass" aria-live="polite">
+						<span class="status-dot"></span>
+						<span>{{ cameraWorkerStatusText }}</span>
+					</div>
 					<div class="status-pill door-status" :class="doorStatusClass" aria-live="polite">
 						<span class="status-dot"></span>
 						<span>{{ doorStatusText }}</span>
@@ -882,22 +886,22 @@
 				<section class="panel" aria-labelledby="cameraTitle">
 					<div class="panel-header">
 						<h2 id="cameraTitle" class="panel-title">Live Camera</h2>
-						<span class="panel-meta">MJPEG stream</span>
+						<span class="panel-meta">{{ cameraPanelMeta }}</span>
 					</div>
-					<div class="video-wrap" :class="{ 'is-unavailable': !feedAvailable }">
+					<div class="video-wrap" :class="{ 'is-unavailable': cameraFeedUnavailable }">
 						<img class="video-stream" src="/mainview" alt="Live camera stream" @load="handleMainViewLoad" @error="handleMainViewError">
-						<div class="video-fallback" v-show="!feedAvailable">
+						<div class="video-fallback" v-show="cameraFeedUnavailable">
 							<div class="video-fallback-inner">
 								<svg class="camera-icon" viewBox="0 0 96 96" role="img" aria-label="Camera unavailable">
 									<rect x="14" y="28" width="50" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="6"></rect>
 									<path d="M64 40l18-12v40L64 56z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="6"></path>
 									<path d="M18 78L78 18" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="6"></path>
 								</svg>
-								<div class="fallback-title">Camera feed unavailable</div>
-								<p class="fallback-copy">The service is running, but the browser is not receiving a video stream.</p>
+								<div class="fallback-title">{{ cameraFallbackTitle }}</div>
+								<p class="fallback-copy">{{ cameraFallbackCopy }}</p>
 							</div>
 						</div>
-						<div class="video-status">{{ cameraStatus }}</div>
+						<div class="video-status">{{ cameraStatusText }}</div>
 					</div>
 				</section>
 
@@ -1083,6 +1087,11 @@
 					doorState: null,
 					mockMode: false,
 					feedAvailable: true,
+					cameraThreadAlive: null,
+					cameraBackend: '',
+					cameraDevice: '',
+					streamFps: null,
+					recognitionFps: null,
 					selectedOrder: [],
 					mergeTarget: '',
 					mergeModalOpen: false,
@@ -1108,6 +1117,52 @@
 						'is-online': this.serviceKind === 'online',
 						'is-error': this.serviceKind === 'error',
 					};
+				},
+				cameraWorkerStatusClass() {
+					return {
+						'is-online': this.cameraThreadAlive === true,
+						'is-error': this.cameraThreadAlive === false,
+					};
+				},
+				cameraWorkerStatusText() {
+					if (this.cameraThreadAlive === true) {
+						return 'Camera worker running';
+					}
+					if (this.cameraThreadAlive === false) {
+						return 'Camera worker stopped';
+					}
+					return 'Camera worker unknown';
+				},
+				cameraFeedUnavailable() {
+					return !this.feedAvailable || this.cameraThreadAlive === false;
+				},
+				cameraStatusText() {
+					if (this.cameraThreadAlive === false) {
+						return 'Camera worker stopped';
+					}
+					return this.cameraStatus;
+				},
+				cameraFallbackTitle() {
+					return this.cameraThreadAlive === false ? 'Camera worker stopped' : 'Camera feed unavailable';
+				},
+				cameraFallbackCopy() {
+					if (this.cameraThreadAlive === false) {
+						return 'The web service is running, but the camera and recognition worker is not active.';
+					}
+					return 'The service is running, but the browser is not receiving a video stream.';
+				},
+				cameraPanelMeta() {
+					const parts = [];
+					if (this.cameraBackend) {
+						parts.push(this.cameraBackend);
+					}
+					if (Number(this.streamFps) > 0) {
+						parts.push(`stream ${this.formatFps(this.streamFps)} fps`);
+					}
+					if (Number(this.recognitionFps) > 0) {
+						parts.push(`recognition ${this.formatFps(this.recognitionFps)} fps`);
+					}
+					return parts.length ? parts.join(' · ') : 'MJPEG stream';
 				},
 				doorStatusClass() {
 					const state = this.doorState && this.doorState.state;
@@ -1209,6 +1264,13 @@
 				},
 				personImageUrl(uid) {
 					return `/image/${encodeURIComponent(uid)}`;
+				},
+				formatFps(value) {
+					const number = Number(value);
+					if (!Number.isFinite(number)) {
+						return '';
+					}
+					return Number.isInteger(number) ? String(number) : number.toFixed(1);
 				},
 				sampleLabel(person) {
 					const sampleCount = Number(person.samples || 1);
@@ -1366,12 +1428,29 @@
 						const status = await this.requestJson('/status');
 						this.mockMode = Boolean(status.mockMode);
 						this.doorState = status.door || null;
+						this.cameraThreadAlive = typeof status.cameraThreadAlive === 'boolean'
+							? status.cameraThreadAlive
+							: null;
+						this.cameraBackend = status.cameraBackend || '';
+						this.cameraDevice = status.cameraDevice || '';
+						this.streamFps = Number(status.streamFps || 0);
+						this.recognitionFps = Number(status.recognitionFps || 0);
+						if (this.cameraThreadAlive === false) {
+							this.feedAvailable = false;
+							this.cameraStatus = 'Camera worker stopped';
+							return;
+						}
 						if (this.mockMode && this.feedAvailable) {
 							this.cameraStatus = 'Mock stream active';
 						}
 					} catch (error) {
 						this.mockMode = false;
 						this.doorState = null;
+						this.cameraThreadAlive = null;
+						this.cameraBackend = '';
+						this.cameraDevice = '';
+						this.streamFps = null;
+						this.recognitionFps = null;
 					}
 				},
 				async manualDoorAction(action) {
@@ -1498,6 +1577,11 @@
 					}
 				},
 				handleMainViewLoad() {
+					if (this.cameraThreadAlive === false) {
+						this.feedAvailable = false;
+						this.cameraStatus = 'Camera worker stopped';
+						return;
+					}
 					this.feedAvailable = true;
 					this.cameraStatus = this.mockMode ? 'Mock stream active' : 'Stream connected';
 				},

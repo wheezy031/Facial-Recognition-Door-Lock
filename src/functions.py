@@ -1,4 +1,3 @@
-import asyncio
 import os
 import select
 import shutil
@@ -482,22 +481,27 @@ def open_camera(size=(1280, 720)):
 	raise RuntimeError('Unknown camera backend: {}'.format(backend))
 
 
-async def videoProcessing(identifier, imshow=False):
+def videoProcessing(identifier, imshow=False):
 	# vstream = cv2.VideoCapture(0)  # desktop webcamera
 	width = int(os.environ.get('DOORLOCK_CAMERA_WIDTH', '1280'))
 	height = int(os.environ.get('DOORLOCK_CAMERA_HEIGHT', '720'))
+	camera_fps = env_float('DOORLOCK_CAMERA_FPS', 10.0)
+	camera_interval = 1.0 / camera_fps
 	processing_scale = env_float('DOORLOCK_PROCESSING_SCALE', 0.5)
 	stream_scale = env_float('DOORLOCK_STREAM_SCALE', 1.0)
+	recognition_fps = env_float('DOORLOCK_RECOGNITION_FPS', 3.0)
+	recognition_interval = 1.0 / recognition_fps
 	camera = None
 	try:
 		camera = open_camera((width, height))
 		print('started video stream')
-		await asyncio.sleep(0.1)
+		time.sleep(0.1)
 		last_camera_error = None
+		last_recognition = 0.0
 
 		while True:
-			await asyncio.sleep(0.1)
-			if identifier.exit:
+			loop_started = time.monotonic()
+			if identifier.shouldExit():
 				break
 
 			try:
@@ -509,56 +513,66 @@ async def videoProcessing(identifier, imshow=False):
 					last_camera_error = error
 				identifier.setNoFeed('No camera feed')
 				identifier.setCurrentFaces([])
+				elapsed = time.monotonic() - loop_started
+				if elapsed < camera_interval:
+					time.sleep(camera_interval - elapsed)
 				continue
 			last_camera_error = None
 
-			processing_frame = scaled_frame(frame, processing_scale)
 			stream_frame = scaled_frame(frame, stream_scale)
-			box_scale_x = stream_frame.shape[1] / processing_frame.shape[1]
-			box_scale_y = stream_frame.shape[0] / processing_frame.shape[0]
 
-			try:
-				faces = identifier.recognizer.extract_embeddings(processing_frame)
-			except Exception as e:
-				print('face recognition failed')
-				print(e)
-				identifier.setCurrentFaces([])
-				continue
-			identifier.setCurrentFaces(faces)
+			now = time.monotonic()
+			if now - last_recognition >= recognition_interval:
+				last_recognition = now
+				processing_frame = scaled_frame(frame, processing_scale)
+				box_scale_x = stream_frame.shape[1] / processing_frame.shape[1]
+				box_scale_y = stream_frame.shape[0] / processing_frame.shape[0]
 
-			for face in faces:
-				left, top, right, bottom = face['box']
-				stream_box = (
-					int(left * box_scale_x),
-					int(top * box_scale_y),
-					int(right * box_scale_x),
-					int(bottom * box_scale_y),
-				)
-				cv2.rectangle(
-					stream_frame,
-					(stream_box[0], stream_box[1]),
-					(stream_box[2], stream_box[3]),
-					(255, 0, 0),
-					3,
-				)
-
-				person = identifier.getIDFromEncoding(face['embedding'])
-
-				if person is None:
-					print('adding new person')
-					identifier.addNew(face['thumbnail'], face['embedding'])
-					continue
-
-				if identifier.hasAccess(person):
-					accessGranted(identifier.displayName(person))
+				try:
+					faces = identifier.recognizer.extract_embeddings(processing_frame)
+				except Exception as e:
+					print('face recognition failed')
+					print(e)
+					identifier.setCurrentFaces([])
+					faces = []
 				else:
-					accessDenied(identifier.displayName(person))
+					identifier.setCurrentFaces(faces)
+
+				for face in faces:
+					left, top, right, bottom = face['box']
+					stream_box = (
+						int(left * box_scale_x),
+						int(top * box_scale_y),
+						int(right * box_scale_x),
+						int(bottom * box_scale_y),
+					)
+					cv2.rectangle(
+						stream_frame,
+						(stream_box[0], stream_box[1]),
+						(stream_box[2], stream_box[3]),
+						(255, 0, 0),
+						3,
+					)
+
+					person = identifier.getIDFromEncoding(face['embedding'])
+
+					if person is None:
+						print('adding new person')
+						identifier.addNew(face['thumbnail'], face['embedding'])
+						continue
+
+					if identifier.hasAccess(person):
+						accessGranted(identifier.displayName(person))
+					else:
+						accessDenied(identifier.displayName(person))
 
 			ret, v = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
 			if ret:
 				identifier.setView(v)
-	except asyncio.CancelledError:
-		raise
+
+			elapsed = time.monotonic() - loop_started
+			if elapsed < camera_interval:
+				time.sleep(camera_interval - elapsed)
 	finally:
 		if camera is not None:
 			camera.close()
