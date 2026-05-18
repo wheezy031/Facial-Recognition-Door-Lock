@@ -17,15 +17,11 @@ The web UI shows the live camera feed, detected people, identity samples, allow/
 
 ## Quick Start
 
+On Raspberry Pi 64-bit systems, first create the Python 3.12 conda environment described in [Raspberry Pi setup](docs/pi-setup.md). MediaPipe wheels are not available for every system Python version.
+
 ```bash
 git clone https://github.com/Jaycar-Electronics/Facial-Recognition-Door-Lock
 cd Facial-Recognition-Door-Lock
-./setup.sh
-```
-
-On Raspberry Pi 64-bit systems, use a Python 3.12 environment for MediaPipe:
-
-```bash
 DOORLOCK_PYTHON_BIN="$HOME/conda-envs/fr-doorlock-py312/bin/python" ./setup.sh
 ```
 
