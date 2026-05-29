@@ -16,7 +16,7 @@ from pathlib import Path
 
 from sanic import Sanic
 import sanic.response as sanic_response
-from functions import close_relay, doorState, lockDoor, unlockDoor, videoProcessing
+from functions import cameraState, close_relay, doorState, lockDoor, unlockDoor, videoProcessing
 from identifier import Identifier
 
 APP_DIR = Path(__file__).resolve().parent
@@ -67,6 +67,7 @@ async def vue_runtime(request):
 async def status(request):
     backend = camera_backend()
     video_thread = getattr(request.app.ctx, 'video_thread', None)
+    camera_state = cameraState()
     return sanic_response.json({
         'cameraBackend': backend,
         'cameraDevice': os.environ.get('DOORLOCK_CAMERA_DEVICE', ''),
@@ -80,6 +81,13 @@ async def status(request):
         'recognitionFps': float(os.environ.get('DOORLOCK_RECOGNITION_FPS', '3')),
         'streamScale': float(os.environ.get('DOORLOCK_STREAM_SCALE', '1.0')),
         'streamFps': float(os.environ.get('DOORLOCK_STREAM_FPS', '10')),
+        'cameraActive': camera_state['cameraActive'],
+        'motionEnabled': camera_state['motionEnabled'],
+        'motionDetected': camera_state['motionDetected'],
+        'motionPin': camera_state['motionPin'],
+        'motionCooldownSeconds': camera_state['motionCooldownSeconds'],
+        'motionLastChanged': camera_state['motionLastChanged'],
+        'motionError': camera_state['motionError'],
         'door': doorState(),
     })
 

@@ -15,6 +15,7 @@ relay_error_reported = False
 unlock_timer = None
 last_access_granted = {}
 door_state_lock = threading.RLock()
+camera_state_lock = threading.RLock()
 door_state = {
 	'state': 'locked',
 	'relayActive': False,
@@ -23,6 +24,15 @@ door_state = {
 	'unlockUntil': None,
 	'unlockSeconds': None,
 	'error': None,
+}
+camera_state = {
+	'cameraActive': False,
+	'motionEnabled': False,
+	'motionDetected': None,
+	'motionPin': None,
+	'motionCooldownSeconds': None,
+	'motionLastChanged': None,
+	'motionError': None,
 }
 
 
@@ -56,6 +66,17 @@ def scaled_frame(frame, scale):
 
 	interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
 	return cv2.resize(frame, None, fx=scale, fy=scale, interpolation=interpolation)
+
+
+def cameraState():
+	with camera_state_lock:
+		return dict(camera_state)
+
+
+def updateCameraState(**updates):
+	with camera_state_lock:
+		camera_state.update(updates)
+		return dict(camera_state)
 
 
 class NullRelay:
@@ -443,6 +464,86 @@ class MockCamera:
 		return None
 
 
+class AlwaysOnMotionController:
+	def __init__(self, reason=None):
+		self.reason = reason
+		updateCameraState(
+			motionEnabled=False,
+			motionDetected=True,
+			motionPin=None,
+			motionCooldownSeconds=None,
+			motionLastChanged=time.time(),
+			motionError=reason,
+		)
+
+	def camera_requested(self):
+		return True
+
+	def close(self):
+		return None
+
+
+class MotionCameraController:
+	def __init__(self):
+		self.pin = int(os.environ.get('DOORLOCK_MOTION_PIN', '17'))
+		self.cooldown = env_float('DOORLOCK_MOTION_CAMERA_COOLDOWN_SECONDS', 10.0)
+		self.lock = threading.RLock()
+		self.motion_detected = False
+		self.last_motion_stop = 0.0
+		self.sensor = gpiozero.MotionSensor(self.pin)
+		self.sensor.when_motion = self._motion_detected
+		self.sensor.when_no_motion = self._motion_stopped
+		if self.sensor.motion_detected:
+			self.motion_detected = True
+		updateCameraState(
+			motionEnabled=True,
+			motionDetected=self.motion_detected,
+			motionPin=self.pin,
+			motionCooldownSeconds=self.cooldown,
+			motionLastChanged=time.time(),
+			motionError=None,
+		)
+		print('motion camera trigger listening on GPIO {}'.format(self.pin))
+
+	def _motion_detected(self):
+		with self.lock:
+			self.motion_detected = True
+		updateCameraState(motionDetected=True, motionLastChanged=time.time())
+		print('motion detected on GPIO {}'.format(self.pin))
+
+	def _motion_stopped(self):
+		with self.lock:
+			self.motion_detected = False
+			self.last_motion_stop = time.monotonic()
+		updateCameraState(motionDetected=False, motionLastChanged=time.time())
+		print('motion stopped on GPIO {}; keeping camera on for {:.1f}s'.format(self.pin, self.cooldown))
+
+	def camera_requested(self):
+		with self.lock:
+			if self.motion_detected:
+				return True
+			if self.last_motion_stop == 0.0:
+				return False
+			return time.monotonic() - self.last_motion_stop < self.cooldown
+
+	def close(self):
+		if hasattr(self, 'sensor') and self.sensor is not None:
+			self.sensor.close()
+			self.sensor = None
+
+
+def open_motion_controller():
+	if truthy(os.environ.get('DOORLOCK_DISABLE_MOTION_CAMERA', '')):
+		return AlwaysOnMotionController()
+
+	try:
+		return MotionCameraController()
+	except Exception as e:
+		error = 'motion sensor unavailable; camera will stay always on: {}'.format(e)
+		print(error)
+		return AlwaysOnMotionController(error)
+
+
 def open_camera(size=(1280, 720)):
 	backend = os.environ.get('DOORLOCK_CAMERA_BACKEND', 'rpicam').strip().lower()
 	if truthy(os.environ.get('DOORLOCK_DISABLE_CAMERA', '')):
@@ -487,15 +588,25 @@ def videoProcessing(identifier, imshow=False):
 	height = int(os.environ.get('DOORLOCK_CAMERA_HEIGHT', '720'))
 	camera_fps = env_float('DOORLOCK_CAMERA_FPS', 10.0)
 	camera_interval = 1.0 / camera_fps
+	idle_interval = env_float('DOORLOCK_MOTION_IDLE_POLL_SECONDS', 0.2)
 	processing_scale = env_float('DOORLOCK_PROCESSING_SCALE', 0.5)
 	stream_scale = env_float('DOORLOCK_STREAM_SCALE', 1.0)
 	recognition_fps = env_float('DOORLOCK_RECOGNITION_FPS', 3.0)
 	recognition_interval = 1.0 / recognition_fps
 	camera = None
+	motion = open_motion_controller()
+
+	def close_camera_if_open(message):
+		nonlocal camera
+		if camera is None:
+			return
+		print(message)
+		camera.close()
+		camera = None
+		updateCameraState(cameraActive=False)
+
 	try:
-		camera = open_camera((width, height))
-		print('started video stream')
-		time.sleep(0.1)
+		identifier.setNoFeed('Waiting for motion')
 		last_camera_error = None
 		last_recognition = 0.0
 
@@ -503,6 +614,29 @@ def videoProcessing(identifier, imshow=False):
 			loop_started = time.monotonic()
 			if identifier.shouldExit():
 				break
+
+			if not motion.camera_requested():
+				close_camera_if_open('stopping camera after motion cooldown')
+				identifier.setNoFeed('Waiting for motion')
+				identifier.setCurrentFaces([])
+				time.sleep(idle_interval)
+				continue
+
+			if camera is None:
+				try:
+					camera = open_camera((width, height))
+				except Exception as e:
+					error = str(e)
+					if error != last_camera_error:
+						print(e)
+						last_camera_error = error
+					identifier.setNoFeed('No camera feed')
+					identifier.setCurrentFaces([])
+					time.sleep(camera_interval)
+					continue
+				updateCameraState(cameraActive=True)
+				print('started video stream')
+				time.sleep(0.1)
 
 			try:
 				frame = camera.capture_array()
@@ -576,5 +710,7 @@ def videoProcessing(identifier, imshow=False):
 	finally:
 		if camera is not None:
 			camera.close()
+		updateCameraState(cameraActive=False)
+		motion.close()
 		close_relay()
 		cv2.destroyAllWindows()
